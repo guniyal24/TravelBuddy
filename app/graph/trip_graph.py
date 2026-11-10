@@ -16,6 +16,7 @@ Human decisions use `interrupt()`; the run pauses (state kept by the checkpointe
 with `Command(resume=...)`, so a plan can wait for an answer for hours.
 """
 import logging
+import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, TypedDict
@@ -78,6 +79,39 @@ DESTINATIONS = {
                              "themes": ["quiet", "golf", "views", "hill", "nature", "family"]},
 }
 
+# How travellers write each town (English spellings, Hinglish, Devanagari). Matched in code, not
+# by the LLM, so a town the traveller names is never lost or mistaken for an interest.
+PLACE_ALIASES = {
+    "destination_haridwar": ["haridwar", "hardwar", "हरिद्वार"],
+    "destination_rishikesh": ["rishikesh", "hrishikesh", "ऋषिकेश"],
+    "destination_dehradun": ["dehradun", "dehra dun", "doon", "देहरादून"],
+    "destination_mussoorie": ["mussoorie", "mussorie", "masoori", "mussourie", "मसूरी"],
+    "destination_nainital": ["nainital", "naini tal", "नैनीताल"],
+    "destination_jim_corbett": ["jim corbett", "corbett", "जिम कॉर्बेट", "कॉर्बेट"],
+    "destination_auli": ["auli", "औली"],
+    "destination_kedarnath": ["kedarnath", "kedar nath", "केदारनाथ"],
+    "destination_badrinath": ["badrinath", "badri nath", "बद्रीनाथ", "बदरीनाथ"],
+    "destination_almora": ["almora", "अल्मोड़ा", "अल्मोडा"],
+    "destination_ranikhet": ["ranikhet", "रानीखेत"],
+}
+_PLACE_RES = {d: re.compile("|".join(rf"(?<![a-z]){re.escape(a)}(?![a-z])" for a in aliases))
+              for d, aliases in PLACE_ALIASES.items()}
+
+
+def named_places(text: str) -> list[str]:
+    """Destination ids the traveller named, in the order they appear in the text."""
+    text = (text or "").lower()
+    found = [(m.start(), d) for d, rx in _PLACE_RES.items() if (m := rx.search(text))]
+    return [d for _, d in sorted(found)]
+
+
+def _says_from(text: str, place: str) -> bool:
+    """True if the text names `place` as the starting point: "from X" or Hindi "X se"."""
+    text = (text or "").lower()
+    return any(re.search(rf"(?<![a-z])(from\s+{re.escape(a)}|{re.escape(a)}\s+(se|से))(?![a-z])",
+                         text) for a in PLACE_ALIASES[place])
+
+
 # Destinations the planner may offer: each needs at least one stay and two stops in the data.
 # Auli and Kedarnath are in the data set but have too few listings; they join once enriched.
 NOT_READY = {"destination_auli", "destination_kedarnath"}
@@ -112,8 +146,9 @@ PLAN_SYSTEM = (
     '{"days":[{"day":1,"destination":"<destination id>","stops":["A1"],"meals":["M1"],'
     '"stay":"S1 or null"}]}. Rules: exactly the requested number of days; max 3 stops and '
     "2 meals per day; stops are Attraction/Activity ids, meals are Eatery ids; every day "
-    "except the last needs a stay id from that day's destination; do not repeat a stop; "
-    "keep each day's stops in one area."
+    "except the last needs a stay id from that day's destination; stops and meals must also "
+    "come from that day's destination (if it has no eateries, leave meals empty); do not "
+    "repeat a stop; keep each day's stops in one area."
 )
 
 
@@ -219,7 +254,21 @@ class TripPlanner:
             merged["days"] = None
         if merged.get("people") is not None and not 1 <= merged["people"] <= 20:
             merged["people"] = None
-        merged.setdefault("interests", [])
+        # Towns named in this message (or, failing that, in an earlier one). Town names the LLM
+        # put under interests are moved out, so they steer the circuit, not the search query.
+        interests = [str(i) for i in merged.get("interests") or []]
+        places = named_places(" ".join([state["user_text"], *interests]))
+        merged["places"] = places or existing.get("places") or []
+        merged["interests"] = [i for i in interests if not named_places(i)]
+        # "Nainital, Ranikhet and Almora" is not a trip *from* Nainital. Keep a town that is also
+        # a stop as the origin only when the text says so ("from Dehradun", "Dehradun se").
+        origin_place = named_places(str(merged.get("origin") or ""))
+        if origin_place and origin_place[0] in merged["places"]:
+            if _says_from(state["user_text"], origin_place[0]):
+                merged["places"] = [p for p in merged["places"] if p != origin_place[0]]
+            else:  # a misread: fall back to the saved origin, unless that is the same town
+                saved = existing.get("origin")
+                merged["origin"] = saved if saved and saved != merged.get("origin") else None
         merged["tier"] = merged.get("tier") if merged.get("tier") in (
             "budget", "mid", "premium") else "budget"
         merged["language"] = merged.get("language") if merged.get("language") in (
@@ -272,9 +321,19 @@ class TripPlanner:
             label = " + ".join(DESTINATIONS[d]["name"] for d in combo)
             scored.append({"id": "+".join(combo), "label": label, "destinations": combo,
                            "reasons": reasons, "score": score})
-        scored.sort(key=lambda o: -o["score"])
+        # Towns the traveller named come first: most named towns covered, then fewest towns
+        # they did not ask for, then season and interest fit.
+        wanted = [d for d in req.get("places") or [] if d not in NOT_READY]
+        scored.sort(key=lambda o: (-len(set(o["destinations"]) & set(wanted)),
+                                   len(set(o["destinations"]) - set(wanted)) if wanted else 0,
+                                   -o["score"]))
+        msg = "Which circuit would you like?"
+        unavailable = [DESTINATIONS[d]["name"] for d in req.get("places") or [] if d in NOT_READY]
+        if unavailable:
+            msg = (f"{' and '.join(unavailable)} can't be planned yet (not enough verified data). "
+                   + msg)
         return {"request": req, "options": scored[:3],
-                "choose_msg": self._loc({"request": req}, "Which circuit would you like?")}
+                "choose_msg": self._loc({"request": req}, msg)}
 
     def _choose(self, state: TripState) -> TripState:
         picked = interrupt({"type": "choose",
