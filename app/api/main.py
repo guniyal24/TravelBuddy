@@ -90,7 +90,12 @@ async def lifespan(app: FastAPI):
             app.state.rag = HybridRAG(s, app.state.store, redis_client)
         else:
             app.state.rag = build_self_rag(s, app.state.store, redis_client)
-        app.state.planner = build_trip_planner(s, app.state.store, redis_client)
+        if s.memory_enabled:
+            from app.memory import TravelMemory
+
+            app.state.memory = TravelMemory.open(s.database_url or s.memory_path)
+        app.state.planner = build_trip_planner(s, app.state.store, redis_client,
+                                               getattr(app.state, "memory", None))
     if not hasattr(app.state, "trips"):
         from app.trips.store import TripStore
 
@@ -111,6 +116,9 @@ async def lifespan(app: FastAPI):
     trips = getattr(app.state, "trips", None)
     if trips is not None and hasattr(trips, "close"):
         trips.close()
+    memory = getattr(app.state, "memory", None)
+    if memory is not None:
+        memory.close()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -389,6 +397,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return Response(build_ics(trip, first_day), media_type="text/calendar", headers={
                 "Content-Disposition": 'attachment; filename="uttarakhand-trip.ics"'})
         raise HTTPException(status_code=400, detail="format must be txt, pdf or ics")
+
+    # --- long-term memory: the traveller can see and delete everything remembered ---
+    def _memory(request: Request):
+        memory = getattr(request.app.state, "memory", None)
+        if memory is None:
+            raise HTTPException(status_code=404, detail="Memory is turned off.")
+        return memory
+
+    @app.get("/api/memories")
+    async def list_memories(request: Request, user: dict = Depends(current_user)):
+        return _memory(request).recall(user["email"])
+
+    @app.delete("/api/memories/{key}")
+    async def forget_memory(key: str, request: Request, user: dict = Depends(current_user)):
+        if not _memory(request).forget(user["email"], key):
+            raise HTTPException(status_code=404, detail="No such memory")
+        return {"forgotten": key}
+
+    @app.delete("/api/memories")
+    async def forget_all(request: Request, user: dict = Depends(current_user)):
+        return {"forgotten": _memory(request).forget_all(user["email"])}
 
     @app.post("/api/feedback")
     async def feedback(

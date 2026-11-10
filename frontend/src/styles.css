@@ -498,3 +498,10 @@ main > div[hidden] { display: none; }
 .quote cite { font-style: normal; color: var(--muted); font-size: 12.5px; }
 .why { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: flex-start; }
 .travel-notes { padding-left: 18px; display: grid; gap: 6px; overflow-wrap: anywhere; }
+
+/* long-term memory panel */
+.memories h2 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.mem-list { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 8px; }
+.mem-list li { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface-2); overflow-wrap: anywhere; }
+.mem-list q { display: block; color: var(--muted); font-style: italic; font-size: 13.5px; margin-top: 2px; }
+.option .pill:not(.ok):not(.warn) { background: var(--soft); color: var(--brand); }

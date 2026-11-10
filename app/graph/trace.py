@@ -20,6 +20,7 @@ AGENTS = {
     "edit": "Planner", "cancel": "Planner", "finalize": "Booking",
     "concierge": "Concierge", "hotel_research": "Hotel agent", "travel_info": "Travel info",
     "rank_hotels": "Ranker", "choose_hotels": "You", "apply_hotels": "Booking",
+    "remember": "Memory",
 }
 # Nodes that pause for the traveller: their "start" is not shown (it repeats on resume).
 HUMAN_NODES = {"ask_missing", "choose", "approve", "choose_hotels"}
@@ -37,6 +38,7 @@ START_MESSAGES = {
     "travel_info": "Searching the web for current travel conditions",
     "rank_hotels": "Ranking hotels by rating, review count, tier and budget",
     "apply_hotels": "Updating your plan and cost with the hotels you picked",
+    "remember": "Saving what I learned about you for next time",
 }
 MAX_DETAILS = 4
 
@@ -86,11 +88,20 @@ def _end(node: str, state: dict, out: dict) -> tuple[str, list[str], str] | None
                                                      else "Hinglish"))
         if out.get("missing"):
             details.append("Still missing: " + ", ".join(out["missing"]))
+        mem = out.get("memories") or []
+        prefs = [m["text"] for m in mem if m.get("kind") == "preference"]
+        trips = [m for m in mem if m.get("kind") == "trip"]
+        if prefs:
+            details.append("Remembered from past trips: " + "; ".join(prefs[:3])
+                           + (f" (+{len(prefs) - 3} more)" if len(prefs) > 3 else ""))
+        if trips:
+            details.append(f"{_n(len(trips), 'past trip')} in memory")
         return "Understood: " + " · ".join(b for b in bits if b), details, "info"
     if node == "options":
         opts = out.get("options") or []
         return (f"Shortlisted {_n(len(opts), 'circuit')}",
-                [o["label"] + (" (season caution)" if o.get("reasons") else "") for o in opts],
+                [o["label"] + (" (season caution)" if o.get("reasons") else "")
+                 + (" (visited before)" if o.get("visited") else "") for o in opts],
                 "info")
     if node == "choose":
         return f"You picked {_names(out.get('destinations') or [])}", [], "ok"
@@ -189,6 +200,11 @@ def _end(node: str, state: dict, out: dict) -> tuple[str, list[str], str] | None
         total = (out.get("cost") or {}).get("total_inr")
         return ("Plan updated with your hotels" + (f": now {_inr(total[0])} to {_inr(total[1])}"
                                                    if total else ""), [], "ok")
+    if node == "remember":
+        learned = out.get("learned") or []
+        return ((f"Learned {_n(len(learned), 'lasting preference')} and saved this trip"
+                 if learned else "Saved this trip to memory"),
+                [f"{m['text']} (you said: “{m['quote']}”)" for m in learned], "ok")
     if node == "edit":
         return "Sending your feedback to the Planner", [], "info"
     if node == "cancel":

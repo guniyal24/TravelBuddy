@@ -179,6 +179,7 @@ export default function Trip({ onExpired, initialTrip }) {
                 <span className="option-icon"><Icon name="route" size={20} /></span>
                 <span className="option-body">
                   <strong>{o.label}</strong>
+                  {o.visited?.length > 0 && <span className="pill"><Icon name="clock" size={13} /> You visited {o.visited.join(" and ")} before</span>}
                   {o.reasons.length > 0
                     ? <span className="pill warn"><Icon name="alert" size={13} /> Heads-up: {o.reasons.join("; ")}</span>
                     : <span className="pill ok"><Icon name="check" size={13} /> Good fit for your dates</span>}

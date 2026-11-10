@@ -245,3 +245,10 @@ def test_concierge_off_goes_straight_to_the_booking_checklist():
     tp.start("c4", "x")
     tp.resume("c4", BOTH)
     assert tp.resume("c4", {"action": "approve"})["status"] == "done"
+
+
+def test_aspect_scores_are_explained_when_they_count():
+    opts = [{"stay_id": "a", "tier": "mid", "google": {"rating": 4.0, "review_count": 500},
+             "analysis": {"aspects": {"cleanliness": 4, "staff": 5}}}]
+    ranked = rank_options(opts, {"tier": "mid"})
+    assert "recent reviews average 4.5/5 across 2 aspects" in ranked[0]["reasons"]

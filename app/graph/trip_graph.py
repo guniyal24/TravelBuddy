@@ -39,6 +39,7 @@ from app.graph.critic import fallback_plan, validate_plan
 from app.graph.render import render_itinerary
 from app.graph.schedule import build_timeline
 from app.graph.trace import Tracer
+from app.memory import TravelMemory, extract_preferences, trip_episode
 from app.rag.retriever import RetrievalError
 from mcp_server.client import LocalTools, ToolError
 
@@ -226,13 +227,19 @@ class TripState(TypedDict, total=False):
     concierge: dict  # ranked hotels per town + travel notes, shown for the hotel choice
     hotels_msg: str
     hotel_choice: dict  # {destination id: chosen stay id}
+    # Long-term memory
+    memories: list  # recalled at intake: preferences and past-trip episodes
+    said: list  # everything the traveller typed this trip (the memory agent learns from it)
+    learned: list  # preferences saved after approval
 
 
 class TripPlanner:
     def __init__(self, llm, retriever, store, small_model: str, big_model: str,
-                 checkpointer=None, tools=None, concierge: bool = False):
+                 checkpointer=None, tools=None, concierge: bool = False,
+                 memory: TravelMemory | None = None):
         self.llm, self.retriever, self.store = llm, retriever, store
         self.concierge = concierge  # research hotels and travel info after approval
+        self.memory = memory  # long-term memory across trips (None: off)
         self.small, self.big = small_model, big_model
         self.tools = tools or LocalTools()  # LocalTools (direct) or MCPTools (via MCP)
         self.graph = self._build(checkpointer or MemorySaver())
@@ -322,7 +329,11 @@ class TripPlanner:
             "relaxed", "balanced", "packed") else ""
         merged["vulnerable_travellers"] = bool(merged.get("vulnerable_travellers"))
         missing = [k for k in REQUIRED if not merged.get(k)]
-        return {"request": merged, "missing": missing}
+        said = [*(state.get("said") or []), state["user_text"]]
+        memories = state.get("memories")
+        if memories is None:  # recall once per trip
+            memories = self.memory.recall(state.get("owner", "")) if self.memory else []
+        return {"request": merged, "missing": missing, "said": said, "memories": memories}
 
     def _route_after_extract(self, state: TripState) -> str:
         if state["missing"] and state.get("asks", 0) < MAX_ASKS:
@@ -357,6 +368,8 @@ class TripPlanner:
         if (len(named) >= 2 and days >= len(named)
                 and not any(set(c) == set(named) for c in combos)):
             combos.append(_route_order(named))
+        visited = {t for m in state.get("memories") or [] if m.get("kind") == "trip"
+                   for t in m.get("towns") or []}
         for combo in combos:
             reasons, score = [], 0
             for d in combo:
@@ -369,8 +382,12 @@ class TripPlanner:
             if len(combo) > 1 and days >= 3:
                 score += 1
             label = " + ".join(DESTINATIONS[d]["name"] for d in combo)
+            seen = [d for d in combo if d in visited]
+            if seen and not set(seen) & set(req.get("places") or []):
+                score -= len(seen)  # gently prefer somewhere new, unless they asked for it
             scored.append({"id": "+".join(combo), "label": label, "destinations": combo,
-                           "reasons": reasons, "score": score})
+                           "reasons": reasons, "score": score,
+                           "visited": [DESTINATIONS[d]["name"] for d in seen]})
         # Towns the traveller named come first: most named towns covered, then fewest towns
         # they did not ask for, then season and interest fit.
         wanted = [d for d in req.get("places") or [] if d not in NOT_READY]
@@ -388,7 +405,8 @@ class TripPlanner:
     def _choose(self, state: TripState) -> TripState:
         picked = interrupt({"type": "choose",
                             "message": state.get("choose_msg") or "Which circuit would you like?",
-                            "options": [{k: o[k] for k in ("id", "label", "reasons")}
+                            "options": [{k: o.get(k) for k in ("id", "label", "reasons",
+                                                               "visited")}
                                         for o in state["options"]]})
         match = next((o for o in state["options"] if o["id"] == picked), state["options"][0])
         return {"destinations": match["destinations"]}
@@ -490,6 +508,10 @@ class TripPlanner:
                 f"tier {req['tier']}, interests {req.get('interests') or 'none'}.\n"
                 f"Destinations in order: {state['destinations']}\n\nCANDIDATES "
                 "(use the short codes like A1, M2, S3 as ids):\n" + "\n".join(lines))
+        prefs = [m["text"] for m in state.get("memories") or [] if m.get("kind") == "preference"]
+        if prefs:
+            user += ("\nRemembered about this traveller from earlier trips (follow these unless "
+                     "this request says otherwise): " + "; ".join(prefs[:10]) + ".")
         pace = req.get("pace")
         if pace == "relaxed":
             user += "\nPace: relaxed. Use at most 2 stops per day."
@@ -695,7 +717,9 @@ class TripPlanner:
                 **self._preview(new)}
 
     def _edit(self, state: TripState) -> TripState:
-        return {"feedback": f"Traveller asked: {state['decision'].get('text', '')}",
+        text = state["decision"].get("text", "")
+        return {"feedback": f"Traveller asked: {text}",
+                "said": [*(state.get("said") or []), text],
                 "plan_attempts": 0, "edits": state.get("edits", 0) + 1}
 
     def _cancel(self, state: TripState) -> TripState:
@@ -741,6 +765,21 @@ class TripPlanner:
             "checklist": checklist, "concierge": self._concierge_summary(state, plan)}
         return {"final": text, "structured": structured, "status": "done"}
 
+    def _remember(self, state: TripState) -> TripState:
+        """Memory agent, after approval only: lasting preferences from what the traveller
+        typed (each kept with its exact quote) and one episode for this trip."""
+        owner = state.get("owner", "")
+        if not self.memory or not owner:
+            return {"learned": []}
+        prefs, _ = extract_preferences(self.llm, self.small, state.get("said") or [])
+        learned = [m for p in prefs
+                   if (m := self.memory.remember(owner, "preference", p["text"], p["quote"]))]
+        edits = [s for s in (state.get("said") or [])[1:] if s]
+        towns = list(dict.fromkeys(d["destination"] for d in state["plan"]["days"]))
+        self.memory.remember(owner, "trip", trip_episode(state["request"], state["plan"], edits),
+                             extra={"towns": towns, "month": state["request"].get("month")})
+        return {"learned": learned}
+
     @staticmethod
     def _concierge_summary(state: TripState, plan: dict) -> dict:
         """What the saved trip keeps from the Concierge: per town the chosen hotel and the
@@ -769,7 +808,7 @@ class TripPlanner:
                          ("concierge", self._concierge), ("hotel_research", self._hotel_research),
                          ("travel_info", self._travel_info), ("rank_hotels", self._rank_hotels),
                          ("choose_hotels", self._choose_hotels),
-                         ("apply_hotels", self._apply_hotels)):
+                         ("apply_hotels", self._apply_hotels), ("remember", self._remember)):
             g.add_node(name, fn)
         g.add_edge(START, "extract")
         g.add_conditional_edges("extract", self._route_after_extract,
@@ -796,7 +835,8 @@ class TripPlanner:
         g.add_edge("choose_hotels", "apply_hotels")
         g.add_edge("apply_hotels", "finalize")
         g.add_edge("edit", "plan")
-        g.add_edge("finalize", END)
+        g.add_edge("finalize", "remember")
+        g.add_edge("remember", END)
         g.add_edge("cancel", END)
         return g.compile(checkpointer=checkpointer)
 
@@ -827,7 +867,8 @@ class TripPlanner:
             "feedback": f"The traveller needs a change from day {from_day} on: {reason}",
             "plan_attempts": 0, "edits": 0, "status": "running",
             "locked_days": [d for d in vals["plan"]["days"] if d["day"] < from_day],
-            "replan_from": from_day}, as_node="edit")
+            "replan_from": from_day, "said": [*(vals.get("said") or []), reason]},
+            as_node="edit")
         return self._run(None, thread_id, on_event)
 
     def owner(self, thread_id: str) -> str | None:

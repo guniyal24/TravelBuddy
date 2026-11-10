@@ -34,6 +34,7 @@ TravelBuddy's rule: **the LLM composes, code checks, the human decides.**
 | **Human in the loop** | Pick a circuit, approve or ask for changes ("less walking", "add a yoga class"), re-plan mid-trip from any day. Paused plans survive server restarts. |
 | **Live agent trace** | Each agent's real work streams to the UI (Server-Sent Events): what it found, what the Critic rejected, timings. |
 | **Concierge** | After you approve, hotel agents run in parallel, one per overnight town. They read Google reviews of that town's hotels, an analyst extracts pros and cons **with exact quotes** (checked in code; 95% survive), a code ranker orders them, and you pick. The plan and cost update. |
+| **Agent memory** | After you approve a trip, a memory agent keeps the lasting preferences you stated ("avoid long drives"), each with your **exact words** (checked in code), plus a short episode of the trip. Next time they shape the plan and towns you visited are labelled. You can see and delete every memory. Contact, ID and payment details are never stored. |
 | **Safety agent** | Altitude-gain rules, high-altitude health notes, monthly advisories with official links to confirm. |
 | **Honest costs** | Ranges, never single numbers; every line says if it is a listing price or an assumption. |
 | **Grounded Q&A** | Self-RAG answers with citations, and declines instead of guessing. |
@@ -77,7 +78,10 @@ flowchart LR
 ```
 
 - **LangGraph** state machine with `interrupt()` for human decisions and a durable checkpointer
-  (Postgres in production, SQLite locally).
+  (Postgres in production, SQLite locally): short-term memory for a trip in progress.
+- **Long-term memory** on LangGraph's `BaseStore` (`PostgresStore` / `SqliteStore`), namespaced
+  per traveller: semantic memories (preferences) and episodic memories (past trips), learned
+  only from approved trips, recalled at intake.
 - **Multi-agent:** Stay, Food and Transport agents run in parallel; the Critic, Safety agent
   and cost engine are deterministic code, so their output is testable. After approval the
   Concierge fans out with LangGraph `Send`: one hotel agent per overnight town plus a
@@ -174,8 +178,7 @@ frontend/    React app (PWA)
 ## Roadmap
 
 1. Reliable LLM-as-judge: checklists, a multi-model jury, human-label agreement.
-2. Agent memory across trips, user-visible and deletable.
-3. Real travel dates with live weather, more towns, road routing.
+2. Real travel dates with live weather, more towns, road routing.
 
 ## Data and licences
 

@@ -144,7 +144,9 @@ def rank_options(options: list[dict], req: dict) -> list[dict]:
                 reasons.append("above your budget per room-night")
         aspects = (o.get("analysis") or {}).get("aspects") or {}
         if aspects:
-            score += 0.2 * ((sum(aspects.values()) / len(aspects)) - 3.0) / 2.0
+            mean = sum(aspects.values()) / len(aspects)
+            score += 0.2 * (mean - 3.0) / 2.0
+            reasons.append(f"recent reviews average {mean:.1f}/5 across {len(aspects)} aspects")
         o["score"], o["reasons"] = round(score, 3), reasons
     return sorted(options, key=lambda o: -o["score"])
 
