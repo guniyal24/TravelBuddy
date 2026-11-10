@@ -27,7 +27,7 @@ def build_self_rag(s: Settings, store: GraphStore, redis_client=None) -> SelfRAG
     return SelfRAG(retriever, store, LLM(chat), s.router_model, s.reasoning_model)
 
 
-def build_trip_planner(s: Settings, store: GraphStore, redis_client=None):
+def build_trip_planner(s: Settings, store: GraphStore, redis_client=None, memory=None):
     from app.graph.persistence import make_checkpointer
     from app.graph.trip_graph import TripPlanner
     from mcp_server.client import MCPTools
@@ -37,4 +37,5 @@ def build_trip_planner(s: Settings, store: GraphStore, redis_client=None):
     retriever = Retriever(embed, index, s.embed_model, redis_client)
     return TripPlanner(LLM(chat), retriever, store, s.router_model, s.planner_model,
                        checkpointer=make_checkpointer(s.checkpoint_path, s.database_url),
-                       tools=MCPTools(s.mcp_transport), concierge=s.concierge_enabled)
+                       tools=MCPTools(s.mcp_transport), concierge=s.concierge_enabled,
+                       memory=memory)

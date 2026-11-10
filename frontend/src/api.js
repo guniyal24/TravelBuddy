@@ -65,6 +65,17 @@ export async function ping(timeoutMs = 2500) {
   finally { clearTimeout(timer); }
 }
 
+// Long-term memory: see and delete what the planner remembers.
+export async function listMemories() {
+  return (await request("/api/memories", { method: "GET" })).json();
+}
+export async function forgetMemory(key) {
+  await request(`/api/memories/${encodeURIComponent(key)}`, { method: "DELETE" });
+}
+export async function forgetAllMemories() {
+  await request("/api/memories", { method: "DELETE" });
+}
+
 // Try the app without an account: a short-lived guest token.
 export async function guestLogin() {
   const res = await request("/api/guest", { auth: false });
