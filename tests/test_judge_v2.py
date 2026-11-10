@@ -244,3 +244,21 @@ def test_llm_retries_rate_limits_then_succeeds(monkeypatch):
     assert llm.retried == 2 and llm.calls == 1
     comp.n = 0
     assert LLM(client, retries=0).json("m", [], default={"d": 1}) == {"d": 1}  # fail fast
+
+
+# ---------- grounding is pure code, so saved results can be re-scored ----------
+def test_grounding_counts_addresses_and_ignores_fragments(tmp_path, monkeypatch):
+    import eval.run as run
+    from eval.judge import grounding
+
+    data = [{"name": "Nakshatra Observatory", "address": "Kasardevi Rd, Almora",
+             "description": "Telescopes", "semantic_text": ""}]
+    f = tmp_path / "entities.json"
+    f.write_text(json.dumps(data))
+    monkeypatch.setattr(run, "ENTITIES", f)
+    kb = run.kb_index()
+    answer = "Visit Nakshatra Observatory on Kasardevi Rd. Mat. Also try Hotel Imaginary."
+    places, ungrounded = grounding(["Kasardevi Rd", "Mat", "Hotel Imaginary", "Kasardevi Rd"],
+                                   answer, kb)
+    assert places == ["Kasardevi Rd", "Hotel Imaginary"]  # 'Mat' dropped, duplicate dropped
+    assert ungrounded == ["Hotel Imaginary"]  # the address is in our data

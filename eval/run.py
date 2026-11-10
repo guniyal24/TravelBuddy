@@ -33,7 +33,15 @@ from app.config import Settings
 from app.db.graph import GraphStore
 from app.rag.factory import build_llm_clients, build_self_rag
 from app.rag.llm import LLM
-from eval.judge import JUDGE_VERSION, JuryJudge, VerdictCache, in_kb, judge_v1  # noqa: F401
+from eval.judge import (  # noqa: F401
+    JUDGE_VERSION,
+    JuryJudge,
+    VerdictCache,
+    _derive,
+    grounding,
+    in_kb,
+    judge_v1,
+)
 from eval.stats import fmt_rate
 from ingest.osm import normalize
 
@@ -75,19 +83,25 @@ SYSTEMS = {"no_rag": run_no_rag, "baseline": run_baseline, "self_rag": run_self_
 
 
 # ---------- judging ----------
+# Every text field the answering model is shown (see app/rag/self_rag.format_entity). A place
+# that appears only in an address, e.g. "Kasardevi Rd", is still in our data.
+KB_TEXT_FIELDS = ("description", "semantic_text", "address", "hours", "price_text")
+
+
 def kb_index(store=None) -> dict:
-    """What counts as 'in our data': entity names plus all description text.
+    """What counts as 'in our data': entity names plus the text of every field shown to the
+    model (descriptions, addresses, hours, prices).
 
     Uses the local dataset if present, otherwise Neo4j (CI has no git-ignored data/processed/).
-    A place mentioned only inside a description (e.g. 'Neel Parvat') is still grounded.
     """
     if ENTITIES.exists():
-        rows = [(e["name"], (e.get("description") or "") + " " + (e.get("semantic_text") or ""))
+        rows = [(e["name"], " ".join(e.get(f) or "" for f in KB_TEXT_FIELDS))
                 for e in json.loads(ENTITIES.read_text())]
     else:
+        fields = ", ".join(f"e.{f} AS {f}" for f in KB_TEXT_FIELDS)
         with store.driver.session() as s:
-            rows = [(r["n"], (r["d"] or "") + " " + (r["t"] or "")) for r in s.run(
-                "MATCH (e:Entity) RETURN e.name AS n, e.description AS d, e.semantic_text AS t")]
+            rows = [(r["n"], " ".join(r[f] or "" for f in KB_TEXT_FIELDS)) for r in s.run(
+                f"MATCH (e:Entity) RETURN e.name AS n, {fields}")]
     names = [n for n in {normalize(n) for n, _ in rows if n} if n]
     return {"names": names, "text": " " + normalize(" ".join(d for _, d in rows)) + " "}
 
@@ -158,6 +172,43 @@ def write_report(results: dict[str, dict], path: Path, judge_note: str = "") -> 
     path.write_text("\n".join(lines))
 
 
+def v2_note(s: Settings) -> str:
+    jury = [m.strip() for m in s.judge_jury.split(",") if m.strip()]
+    return (f"Judge {JUDGE_VERSION}: yes/no checklist, jury of {len(jury)} model families "
+            f"({', '.join(m.split('/')[-1] for m in jury)}), {s.judge_samples} sampled verdicts "
+            f"each at temperature {s.judge_temperature}, majority vote, cached. Named places "
+            "are checked in code: they must appear in the answer and in the knowledge base "
+            "(names, descriptions, addresses, hours, prices). Reliability: eval/RELIABILITY.md.")
+
+
+def rescore(s: Settings) -> None:
+    """Re-apply the code half of the judge to today's saved results and rebuild the report.
+    The LLM verdicts are kept as they are; only the knowledge-base checks run again."""
+    store = None if ENTITIES.exists() else GraphStore(s.neo4j_uri, s.neo4j_user,
+                                                      s.neo4j_password, s.neo4j_database)
+    kb = kb_index(store)
+    merged = {}
+    for name in SYSTEMS:
+        f = ROOT / "results" / f"{date.today()}-{name}.json"
+        if not f.exists():
+            continue
+        rows = json.loads(f.read_text())
+        changed = 0
+        for r in rows:
+            j = r["judge"]
+            if j.get("version") != JUDGE_VERSION:
+                continue
+            places, ungrounded = grounding(j["named_places"], r["answer"], kb)
+            changed += ungrounded != j["ungrounded_places"]
+            j.update({"named_places": places, "ungrounded_places": ungrounded,
+                      **_derive(j["items"], ungrounded)})
+        f.write_text(json.dumps(rows, indent=2, ensure_ascii=False))
+        merged[name] = summarize(rows)
+        print(f"{name}: {changed} answers re-scored")
+    write_report(merged, ROOT / "RESULTS.md", v2_note(s))
+    print("\n" + (ROOT / "RESULTS.md").read_text())
+
+
 def main() -> None:
     logging.basicConfig(level=logging.WARNING)
     load_dotenv()
@@ -166,9 +217,14 @@ def main() -> None:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--judge", choices=["v1", "v2"], default="v2")
     ap.add_argument("--no-cache", action="store_true", help="re-ask every juror")
+    ap.add_argument("--rescore", action="store_true",
+                    help="re-apply the code checks to today's saved results (no LLM calls)")
     args = ap.parse_args()
 
     s = Settings()
+    if args.rescore:
+        rescore(s)
+        return
     store = GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database)
     chat, _ = build_llm_clients(s)
     ctx = {"settings": s, "store": store, "llm": LLM(chat, retries=6)}
@@ -185,11 +241,7 @@ def main() -> None:
     if args.judge == "v2":
         cache = VerdictCache(None if args.no_cache else ROOT / "results" / "judge_cache.sqlite")
         jj = JuryJudge(judge_llm, jury, s.judge_samples, s.judge_temperature, cache)
-        judge_note = (f"Judge {JUDGE_VERSION}: yes/no checklist, jury of {len(jury)} model "
-                      f"families ({', '.join(m.split('/')[-1] for m in jury)}), "
-                      f"{s.judge_samples} sampled verdicts each at temperature "
-                      f"{s.judge_temperature}, majority vote, cached. Named places are checked "
-                      "against the knowledge base in code. Reliability: eval/RELIABILITY.md.")
+        judge_note = v2_note(s)
 
         def judge(q, a):
             return jj(q, a, kb)

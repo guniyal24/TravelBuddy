@@ -101,6 +101,22 @@ def appears_in(name: str, answer: str) -> bool:
                for i in range(max(0, len(words) - size + 1)))
 
 
+MIN_NAME_CHARS = 4  # "Mat", "Rd": extraction fragments, not place names
+
+
+def grounding(extracted: list[str], answer: str, kb: dict) -> tuple[list[str], list[str]]:
+    """Code half of the place check: keep extracted names that really occur in the answer
+    (deduplicated), then list those our data does not contain. Pure code, so saved results
+    can be re-scored without asking any LLM again (`eval.run --rescore`)."""
+    seen, places = set(), []
+    for p in extracted:
+        key = normalize(p)
+        if (len(key) >= MIN_NAME_CHARS and key not in seen and appears_in(p, answer)):
+            seen.add(key)
+            places.append(p)
+    return places, [p for p in places if not in_kb(p, kb)]
+
+
 # ---------------------------------------------------------------- cache
 class VerdictCache:
     """Raw juror verdicts on disk, keyed by everything that determines them."""
@@ -213,15 +229,8 @@ class JuryJudge:
             items[item] = bool(final)
             votes[item] = per_juror
             agreement[item] = sum(v == bool(final) for v in valid) / len(valid) if valid else 0.0
-        # Names: union over every sample, but only names that really occur in the answer.
-        seen, places = set(), []
-        for v in raw.values():
-            for p in v["named_places"]:
-                key = normalize(p)
-                if key and key not in seen and appears_in(p, answer):
-                    seen.add(key)
-                    places.append(p)
-        ungrounded = [p for p in places if not in_kb(p, kb)]
+        places, ungrounded = grounding([p for v in raw.values() for p in v["named_places"]],
+                                       answer, kb)
         failed = sum(1 for verdict in raw.values() if all(verdict[i] is None for i in ITEMS))
         return {**_derive(items, ungrounded), "items": items, "votes": votes,
                 "agreement": agreement, "named_places": places,
