@@ -18,6 +18,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from app.rag.llm import LLM
+from app.rag.retriever import RetrievalError
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,20 @@ ABSTAIN_MESSAGE = (
     "Nainital, Kedarnath, Kausani and more: places to see, stays, food and activities), so I'd "
     "rather not guess."
 )
+# Search being down is not the same as finding nothing: say so instead of an "I don't know".
+UNAVAILABLE_MESSAGE = (
+    "My places search is not responding right now, so I can't give you a reliable answer. "
+    "Please try again in a minute."
+)
+UNAVAILABLE_MESSAGE_HI = (
+    "मेरी जगहों की खोज अभी जवाब नहीं दे रही है, इसलिए मैं भरोसेमंद जवाब नहीं दे सकता। "
+    "कृपया एक मिनट बाद फिर से पूछें।"
+)
+ERROR_MESSAGE = "Something went wrong while answering. Please try again."
+
+
+def _is_hindi(text: str) -> bool:
+    return bool(re.search(r"[ऀ-ॿ]", text or ""))
 
 GRADER_SYSTEM = (
     "You grade search results for a travel question about Uttarakhand. You get a question "
@@ -126,7 +141,8 @@ class SelfRAG:
     # ---- nodes ----
     def _retrieve(self, state: RAGState) -> RAGState:
         query = state.get("query") or state["question"]
-        docs = self.retriever.search(query, top_k=TOP_K)
+        # strict: a search outage raises RetrievalError instead of looking like "nothing found"
+        docs = self.retriever.search(query, top_k=TOP_K, strict=True, attempts=2)
         n = state.get("retrievals", 0) + 1
         trace = [*state.get("trace", []), f"retrieve#{n}: {len(docs)} candidates for {query!r}"]
         return {"query": query, "docs": docs, "retrievals": n, "trace": trace}
@@ -224,7 +240,7 @@ class SelfRAG:
         return "retry"
 
     def _abstain(self, state: RAGState) -> RAGState:
-        hindi = bool(re.search(r"[\u0900-\u097F]", state.get("question", "")))
+        hindi = _is_hindi(state.get("question", ""))
         return {"answer": ABSTAIN_MESSAGE_HI if hindi else ABSTAIN_MESSAGE,
                 "abstained": True, "relevant": [], "grounded": True,
                 "trace": [*state["trace"], "abstain: nothing relevant found"]}
@@ -277,14 +293,24 @@ class SelfRAG:
 
         Progress is streamed as status chunks wrapped in \x01...\x02 (control characters that
         never occur in answers); the client shows them as live status and drops them from the
-        final text. The answer itself follows as plain text.
+        final text. The answer itself follows as plain text. A failure always ends with a
+        message the traveller can read, never a stream that just stops.
         """
         state: dict = {}
-        for node, update in self.stream_steps(query, history):
-            state.update(update)
-            label = self.STATUS_LABELS.get(node)
-            if label:
-                yield f"\x01{label}\x02"
+        try:
+            for node, update in self.stream_steps(query, history):
+                state.update(update)
+                label = self.STATUS_LABELS.get(node)
+                if label:
+                    yield f"\x01{label}\x02"
+        except RetrievalError:
+            log.error("chat: places search unavailable")
+            yield UNAVAILABLE_MESSAGE_HI if _is_hindi(query) else UNAVAILABLE_MESSAGE
+            return
+        except Exception:
+            log.exception("chat: answering failed")
+            yield ERROR_MESSAGE
+            return
         ids = [d["id"] for d in state.get("relevant", [])]
         yield state["answer"]
         if hasattr(self.store, "log_interaction"):

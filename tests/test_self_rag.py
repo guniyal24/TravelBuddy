@@ -1,5 +1,12 @@
 from app.rag.llm import LLM
-from app.rag.self_rag import ABSTAIN_MESSAGE, SelfRAG, format_entity
+from app.rag.retriever import RetrievalError
+from app.rag.self_rag import (
+    ABSTAIN_MESSAGE,
+    ERROR_MESSAGE,
+    UNAVAILABLE_MESSAGE,
+    SelfRAG,
+    format_entity,
+)
 
 
 class FakeLLM:
@@ -23,7 +30,7 @@ class FakeRetriever:
         self.results = list(results_per_call)
         self.queries = []
 
-    def search(self, query, top_k=12):
+    def search(self, query, top_k=12, **kw):
         self.queries.append(query)
         return self.results.pop(0) if self.results else []
 
@@ -130,6 +137,28 @@ def test_get_answer_matches_hybrid_interface_and_logs():
     assert all(c.startswith("\x01") and c.endswith("\x02") for c in statuses)
     assert "\x01Verifying facts...\x02" in statuses
     assert rag.store.logged == [("sess1", "q", "ok [a]", ["a"])]
+
+
+def test_a_search_outage_is_reported_not_answered_as_unknown():
+    class DownRetriever(FakeRetriever):
+        def search(self, query, top_k=12, **kw):
+            assert kw.get("strict") is True  # outages must raise, not look like "nothing found"
+            raise RetrievalError("down")
+
+    rag = SelfRAG(DownRetriever([]), FakeStore(), FakeLLM([], []), "router", "reasoner")
+    chunks = list(rag.get_answer("yoga in Rishikesh", "s", []))
+    assert chunks[-1] == UNAVAILABLE_MESSAGE and ABSTAIN_MESSAGE not in chunks
+    assert rag.store.logged == []  # nothing answered, nothing logged as an answer
+
+
+def test_an_unexpected_failure_still_ends_with_a_message():
+    class BrokenLLM(FakeLLM):
+        def json(self, *a, **kw):
+            raise RuntimeError("provider exploded")
+
+    rag = SelfRAG(FakeRetriever([[doc("a")]]), FakeStore(), BrokenLLM([], []), "r", "g")
+    chunks = list(rag.get_answer("q", "s", []))
+    assert chunks[-1] == ERROR_MESSAGE and chunks[0] == "\x01Searching places...\x02"
 
 
 def test_stream_steps_yields_nodes_in_order():
