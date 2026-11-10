@@ -37,11 +37,19 @@ from app.graph.critic import fallback_plan, validate_plan
 from app.graph.render import render_itinerary
 from app.graph.schedule import build_timeline
 from app.graph.trace import Tracer
+from app.rag.retriever import RetrievalError
 from mcp_server.client import LocalTools, ToolError
 
 log = logging.getLogger(__name__)
 
 OnEvent = Callable[[dict], None] | None
+UNAVAILABLE_MSG = ("The places database is not responding right now, so I can't build a "
+                   "reliable plan. Please try again in a minute.")
+
+
+class PlanningUnavailable(Exception):
+    """A data store the planner depends on is down. The run stops instead of producing an
+    empty or made-up plan; the message is safe to show the traveller."""
 
 MAX_ASKS = 2
 MAX_PLAN_ATTEMPTS = 3
@@ -103,6 +111,23 @@ def named_places(text: str) -> list[str]:
     text = (text or "").lower()
     found = [(m.start(), d) for d, rx in _PLACE_RES.items() if (m := rx.search(text))]
     return [d for _, d in sorted(found)]
+
+
+def _route_order(places: list[str]) -> list[str]:
+    """Visit order for an ad-hoc circuit: start where the traveller started naming towns, then
+    always go to the nearest town not yet visited (straight-line distance)."""
+    from ingest.geo import haversine_km
+
+    def km(a: str, b: str) -> float:
+        return haversine_km(DESTINATIONS[a]["lat"], DESTINATIONS[a]["lon"],
+                            DESTINATIONS[b]["lat"], DESTINATIONS[b]["lon"])
+
+    route, rest = [places[0]], list(places[1:])
+    while rest:
+        nxt = min(rest, key=lambda p: km(route[-1], p))
+        route.append(nxt)
+        rest.remove(nxt)
+    return route
 
 
 def _says_from(text: str, place: str) -> bool:
@@ -307,6 +332,12 @@ class TripPlanner:
         combos = [c for c, min_days in CIRCUITS
                   if days >= min_days and not NOT_READY.intersection(c)]
         combos += [[d] for d in DESTINATIONS if d not in NOT_READY]
+        # The traveller named a set of towns no ready-made circuit covers (e.g. Ranikhet and
+        # Almora): offer exactly those, in a sensible travel order, if there is a day for each.
+        named = [d for d in req.get("places") or [] if d not in NOT_READY]
+        if (len(named) >= 2 and days >= len(named)
+                and not any(set(c) == set(named) for c in combos)):
+            combos.append(_route_order(named))
         for combo in combos:
             reasons, score = [], 0
             for d in combo:
@@ -353,13 +384,18 @@ class TripPlanner:
 
         def search(task):  # independent network calls: run them in parallel
             dest, (key, types, query, k) = task
+            # strict: a search that keeps failing raises, instead of looking like "no results"
             hits = self.retriever.search(query, top_k=k, filter={
-                "city": DESTINATIONS[dest]["name"], "type": {"$in": types}})
+                "city": DESTINATIONS[dest]["name"], "type": {"$in": types}},
+                strict=True, attempts=3)
             return dest, key, [h["id"] for h in hits]
 
         tasks = [(d, spec) for d in state["destinations"] for spec in specs]
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            found = list(pool.map(search, tasks))
+        try:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                found = list(pool.map(search, tasks))
+        except RetrievalError as exc:
+            raise PlanningUnavailable(UNAVAILABLE_MSG) from exc
         candidates, entities = {}, {}
         for dest in state["destinations"]:
             pools = {key: ids for d, key, ids in found if d == dest}
@@ -372,6 +408,11 @@ class TripPlanner:
                 "stops": [ents[i] for i in pools["stops"] if i in ents][:8],
                 "meals": [ents[i] for i in pools["meals"] if i in ents][:6],
                 "stays": stays[:6]}
+            # Every offered town has places and stays in the data, so finding neither means a
+            # store failed. Never hand the traveller an empty plan.
+            if not candidates[dest]["stops"] and not candidates[dest]["stays"]:
+                log.error("research found nothing for %s; treating as an outage", dest)
+                raise PlanningUnavailable(UNAVAILABLE_MSG)
         return {"candidates": candidates, "entities": entities}
 
     # ---------------- supervisor: specialist agents ----------------

@@ -14,8 +14,9 @@ Metrics (all printed + written to eval/RESULTS.md):
   answers          answerable: share judged to actually answer the question
   calls/latency    LLM calls and seconds per question
 
-The judge is an LLM (the reasoning model, temperature 0), so absolute numbers are
-indicative; the comparison between systems under the same judge is what matters.
+Rates are reported with 95% Wilson intervals. The judge is eval/judge.py: by default the v2
+checklist jury (three model families, sampled verdicts, majority vote, cached), or the old
+single-call judge with --judge v1. Its reliability is measured in eval/reliability.py.
 """
 import argparse
 import json
@@ -23,7 +24,6 @@ import logging
 import statistics
 import time
 from datetime import date
-from difflib import SequenceMatcher
 from pathlib import Path
 
 import yaml
@@ -32,23 +32,23 @@ from dotenv import load_dotenv
 from app.config import Settings
 from app.db.graph import GraphStore
 from app.rag.factory import build_llm_clients, build_self_rag
-from app.rag.hybrid import SYSTEM_PROMPT, HybridRAG
 from app.rag.llm import LLM
+from eval.judge import (  # noqa: F401
+    JUDGE_VERSION,
+    JuryJudge,
+    VerdictCache,
+    _derive,
+    grounding,
+    in_kb,
+    judge_v1,
+)
+from eval.stats import fmt_rate
 from ingest.osm import normalize
 
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent
 ENTITIES = ROOT.parent / "data" / "processed" / "entities.json"
-
-JUDGE_SYSTEM = (
-    "You evaluate a travel assistant's ANSWER to a QUESTION about Uttarakhand. Return JSON "
-    'only: {"answers_question": bool, "declines": bool, "invents_specifics": bool, '
-    '"named_places": [str]}. answers_question: the answer gives useful, on-topic content. '
-    "declines: the answer says it lacks the information / cannot confirm. invents_specifics: "
-    "the answer states specific names, prices, fares, timings or fees as fact. named_places: "
-    "every specific hotel, restaurant, temple, ashram, attraction or dish named in the answer "
-    "(NOT cities, rivers, states or generic words)."
-)
+LANGS = {"en": "English", "hi": "Hindi", "hinglish": "Hinglish"}
 
 
 # ---------- systems: each returns (answer, context_ids) ----------
@@ -61,6 +61,8 @@ def run_no_rag(q: str, ctx) -> tuple[str, list[str]]:
 
 
 def run_baseline(q: str, ctx) -> tuple[str, list[str]]:
+    from app.rag.hybrid import SYSTEM_PROMPT, HybridRAG  # loads a re-ranking model
+
     hybrid: HybridRAG = ctx["hybrid"]
     matches = hybrid.retrieve(q)
     ids = [m["id"] for m in matches]
@@ -81,86 +83,130 @@ SYSTEMS = {"no_rag": run_no_rag, "baseline": run_baseline, "self_rag": run_self_
 
 
 # ---------- judging ----------
+# Every text field the answering model is shown (see app/rag/self_rag.format_entity). A place
+# that appears only in an address, e.g. "Kasardevi Rd", is still in our data.
+KB_TEXT_FIELDS = ("description", "semantic_text", "address", "hours", "price_text")
+
+
 def kb_index(store=None) -> dict:
-    """What counts as 'in our data': entity names plus all description text.
+    """What counts as 'in our data': entity names plus the text of every field shown to the
+    model (descriptions, addresses, hours, prices).
 
     Uses the local dataset if present, otherwise Neo4j (CI has no git-ignored data/processed/).
-    A place mentioned only inside a description (e.g. 'Neel Parvat') is still grounded.
     """
     if ENTITIES.exists():
-        rows = [(e["name"], (e.get("description") or "") + " " + (e.get("semantic_text") or ""))
+        rows = [(e["name"], " ".join(e.get(f) or "" for f in KB_TEXT_FIELDS))
                 for e in json.loads(ENTITIES.read_text())]
     else:
+        fields = ", ".join(f"e.{f} AS {f}" for f in KB_TEXT_FIELDS)
         with store.driver.session() as s:
-            rows = [(r["n"], (r["d"] or "") + " " + (r["t"] or "")) for r in s.run(
-                "MATCH (e:Entity) RETURN e.name AS n, e.description AS d, e.semantic_text AS t")]
+            rows = [(r["n"], " ".join(r[f] or "" for f in KB_TEXT_FIELDS)) for r in s.run(
+                f"MATCH (e:Entity) RETURN e.name AS n, {fields}")]
     names = [n for n in {normalize(n) for n, _ in rows if n} if n]
     return {"names": names, "text": " " + normalize(" ".join(d for _, d in rows)) + " "}
-
-
-def in_kb(place: str, kb: dict) -> bool:
-    p = normalize(place)
-    if not p:
-        return True  # nothing meaningful to check
-    if f" {p} " in kb["text"]:
-        return True  # mentioned in a description
-    for n in kb["names"]:
-        if p == n or SequenceMatcher(None, p, n).ratio() >= 0.85:
-            return True
-        if min(len(p), len(n)) >= 5 and (p in n or n in p):
-            return True
-    return False
-
-
-def judge(judge_llm: LLM, model: str, question: str, answer: str, kb: dict) -> dict:
-    res = judge_llm.json(
-        model,
-        [{"role": "system", "content": JUDGE_SYSTEM},
-         {"role": "user", "content": f"QUESTION: {question}\n\nANSWER: {answer}"}],
-        default={})
-    places = [p for p in (res.get("named_places") or []) if isinstance(p, str)]
-    ungrounded = [p for p in places if not in_kb(p, kb)]
-    return {"answers_question": bool(res.get("answers_question")),
-            "declines": bool(res.get("declines")),
-            "invents": bool(res.get("invents_specifics")),
-            "named_places": places, "ungrounded_places": ungrounded}
 
 
 def pct(xs: list[bool]) -> str:
     return f"{100 * sum(xs) / len(xs):.0f}%" if xs else "n/a"
 
 
+def _rate(xs: list[bool]) -> str:
+    return fmt_rate(sum(xs), len(xs))
+
+
 def summarize(rows: list[dict]) -> dict:
+    """Headline rates (plain percentages, read by the CI gate) plus the same rates with
+    95% intervals (`*_ci`) and per-language answer rates for the report."""
     ans = [r for r in rows if r["kind"] == "answerable"]
     una = [r for r in rows if r["kind"] == "unanswerable"]
-    return {
-        "n_answerable": len(ans), "n_unanswerable": len(una),
-        "hit": pct([r["hit"] for r in ans]) if ans and ans[0]["has_context"] else "n/a",
-        "ungrounded": pct([bool(r["judge"]["ungrounded_places"]) for r in ans]),
-        "answers": pct([r["judge"]["answers_question"] for r in ans]),
-        "declines": pct([r["judge"]["declines"] for r in una]),
-        "invents": pct([r["judge"]["invents"] and not r["judge"]["declines"] for r in una]),
-        "calls": f"{statistics.mean(r['llm_calls'] for r in rows):.1f}",
-        "latency_s": f"{statistics.mean(r['latency_s'] for r in rows):.1f}",
+    has_ctx = bool(ans) and ans[0]["has_context"]
+    metrics = {
+        "hit": [r["hit"] for r in ans] if has_ctx else None,
+        "ungrounded": [bool(r["judge"]["ungrounded_places"]) for r in ans],
+        "answers": [r["judge"]["answers_question"] for r in ans],
+        "declines": [r["judge"]["declines"] for r in una],
+        "invents": [r["judge"]["invents"] and not r["judge"]["declines"] for r in una],
     }
+    out = {"n_answerable": len(ans), "n_unanswerable": len(una)}
+    for key, xs in metrics.items():
+        out[key] = pct(xs) if xs is not None else "n/a"
+        out[f"{key}_ci"] = _rate(xs) if xs is not None else "n/a"
+    for lang in LANGS:
+        sub = [r["judge"]["answers_question"] for r in ans if r.get("lang", "en") == lang]
+        out[f"answers_{lang}"] = _rate(sub) if sub else "n/a"
+    # A verdict with missing jury votes is counted, never silently read as "no".
+    out["judge_incomplete"] = sum(1 for r in rows if r["judge"].get("complete") is False)
+    out["answer_errors"] = sum(1 for r in rows if r.get("answer", "").startswith("[error"))
+    out["calls"] = f"{statistics.mean(r['llm_calls'] for r in rows):.1f}" if rows else "n/a"
+    out["latency_s"] = f"{statistics.mean(r['latency_s'] for r in rows):.1f}" if rows else "n/a"
+    return out
 
 
-def write_report(results: dict[str, dict], path: Path) -> None:
-    cols = [("hit", "hit@k (answerable)"), ("ungrounded", "answers naming places not in data"),
-            ("answers", "answers the question"), ("declines", "declines (unanswerable)"),
-            ("invents", "invents specifics (unanswerable)"), ("calls", "LLM calls/q"),
+def write_report(results: dict[str, dict], path: Path, judge_note: str = "") -> None:
+    cols = [("hit_ci", "hit@k (answerable)"),
+            ("ungrounded_ci", "answers naming places not in data ↓"),
+            ("answers_ci", "answers the question"), ("declines_ci", "declines (unanswerable)"),
+            ("invents_ci", "invents specifics (unanswerable) ↓"), ("calls", "LLM calls/q"),
             ("latency_s", "latency s/q")]
     lines = [f"# Evaluation results ({date.today()})", "",
              "| system | " + " | ".join(c[1] for c in cols) + " |",
              "|---|" + "---|" * len(cols)]
     for name, summ in results.items():
-        lines.append(f"| {name} | " + " | ".join(str(summ[c[0]]) for c in cols) + " |")
+        lines.append(f"| {name} | " + " | ".join(str(summ.get(c[0], "n/a")) for c in cols) + " |")
+    lines += ["", "**Answers the question, by language** (answerable questions)", "",
+              "| system | " + " | ".join(LANGS.values()) + " |",
+              "|---|" + "---|" * len(LANGS)]
+    for name, summ in results.items():
+        lines.append(f"| {name} | " + " | ".join(summ.get(f"answers_{k}", "n/a")
+                                                 for k in LANGS) + " |")
     first = next(iter(results.values()))
     lines += ["", f"Golden set: {first['n_answerable']} answerable + "
-              f"{first['n_unanswerable']} unanswerable questions (`eval/golden.yaml`). "
-              "Lower is better for 'names places not in data' and 'invents specifics'; "
-              "higher is better elsewhere. Judge: LLM, temperature 0.", ""]
+              f"{first['n_unanswerable']} unanswerable questions (`eval/golden.yaml`), in "
+              "English, Hindi and Hinglish, including prompt-injection and false-premise "
+              "questions. Each cell is a rate with its 95% Wilson interval. ↓ = lower is better.",
+              "", judge_note or "Judge: see eval/judge.py.", "",
+              "Data quality: " + "; ".join(
+                  f"{name}: {s.get('answer_errors', 0)} answer errors, "
+                  f"{s.get('judge_incomplete', 0)} incomplete judgements"
+                  for name, s in results.items()) + ".", ""]
     path.write_text("\n".join(lines))
+
+
+def v2_note(s: Settings) -> str:
+    jury = [m.strip() for m in s.judge_jury.split(",") if m.strip()]
+    return (f"Judge {JUDGE_VERSION}: yes/no checklist, jury of {len(jury)} model families "
+            f"({', '.join(m.split('/')[-1] for m in jury)}), {s.judge_samples} sampled verdicts "
+            f"each at temperature {s.judge_temperature}, majority vote, cached. Named places "
+            "are checked in code: they must appear in the answer and in the knowledge base "
+            "(names, descriptions, addresses, hours, prices). Reliability: eval/RELIABILITY.md.")
+
+
+def rescore(s: Settings) -> None:
+    """Re-apply the code half of the judge to today's saved results and rebuild the report.
+    The LLM verdicts are kept as they are; only the knowledge-base checks run again."""
+    store = None if ENTITIES.exists() else GraphStore(s.neo4j_uri, s.neo4j_user,
+                                                      s.neo4j_password, s.neo4j_database)
+    kb = kb_index(store)
+    merged = {}
+    for name in SYSTEMS:
+        f = ROOT / "results" / f"{date.today()}-{name}.json"
+        if not f.exists():
+            continue
+        rows = json.loads(f.read_text())
+        changed = 0
+        for r in rows:
+            j = r["judge"]
+            if j.get("version") != JUDGE_VERSION:
+                continue
+            places, ungrounded = grounding(j["named_places"], r["answer"], kb)
+            changed += ungrounded != j["ungrounded_places"]
+            j.update({"named_places": places, "ungrounded_places": ungrounded,
+                      **_derive(j["items"], ungrounded)})
+        f.write_text(json.dumps(rows, indent=2, ensure_ascii=False))
+        merged[name] = summarize(rows)
+        print(f"{name}: {changed} answers re-scored")
+    write_report(merged, ROOT / "RESULTS.md", v2_note(s))
+    print("\n" + (ROOT / "RESULTS.md").read_text())
 
 
 def main() -> None:
@@ -169,18 +215,41 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--systems", nargs="*", default=list(SYSTEMS))
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--judge", choices=["v1", "v2"], default="v2")
+    ap.add_argument("--no-cache", action="store_true", help="re-ask every juror")
+    ap.add_argument("--rescore", action="store_true",
+                    help="re-apply the code checks to today's saved results (no LLM calls)")
     args = ap.parse_args()
 
     s = Settings()
+    if args.rescore:
+        rescore(s)
+        return
     store = GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database)
     chat, _ = build_llm_clients(s)
-    ctx = {"settings": s, "store": store, "llm": LLM(chat)}
+    ctx = {"settings": s, "store": store, "llm": LLM(chat, retries=6)}
     if "baseline" in args.systems:
+        from app.rag.hybrid import HybridRAG
+
         ctx["hybrid"] = HybridRAG(s, store)
     if "self_rag" in args.systems:
         ctx["self_rag"] = build_self_rag(s, store)
-    judge_llm = LLM(chat)
+        ctx["self_rag"].llm.retries = 6  # batch job: wait out rate limits instead of failing
+    judge_llm = LLM(chat, retries=6)
     kb = kb_index(store)
+    jury = [m.strip() for m in s.judge_jury.split(",") if m.strip()]
+    if args.judge == "v2":
+        cache = VerdictCache(None if args.no_cache else ROOT / "results" / "judge_cache.sqlite")
+        jj = JuryJudge(judge_llm, jury, s.judge_samples, s.judge_temperature, cache)
+        judge_note = v2_note(s)
+
+        def judge(q, a):
+            return jj(q, a, kb)
+    else:
+        judge_note = f"Judge v1: one call to {s.judge_model}, temperature 0."
+
+        def judge(q, a):
+            return judge_v1(judge_llm, s.judge_model, q, a, kb)
 
     questions = yaml.safe_load((ROOT / "golden.yaml").read_text())["questions"]
     if args.limit:
@@ -199,9 +268,10 @@ def main() -> None:
                 answer, ids = f"[error: {exc}]", []
             latency = time.time() - t0
             calls = gen_llm.calls - before
-            j = judge(judge_llm, s.judge_model, q["query"], answer, kb)
+            j = judge(q["query"], answer)
             rows.append({
                 "id": q["id"], "kind": q["kind"], "category": q["category"],
+                "lang": q.get("lang", "en"),
                 "query": q["query"], "answer": answer, "context_ids": ids,
                 "has_context": name != "no_rag",
                 "hit": bool(set(q.get("expected_any", [])) & set(ids)),
@@ -223,7 +293,9 @@ def main() -> None:
         f = out_dir / f"{date.today()}-{name}.json"
         if f.exists():
             merged[name] = summarize(json.loads(f.read_text()))
-    write_report(merged, ROOT / "RESULTS.md")
+    write_report(merged, ROOT / "RESULTS.md", judge_note)
+    print(f"judge LLM calls: {judge_llm.calls}, tokens in/out: {judge_llm.prompt_tokens}/"
+          f"{judge_llm.completion_tokens}")
     print("\n" + (ROOT / "RESULTS.md").read_text())
     store.close()
 
