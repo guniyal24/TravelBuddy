@@ -225,10 +225,13 @@ class TripState(TypedDict, total=False):
 class TripPlanner:
     def __init__(self, llm, retriever, store, small_model: str, big_model: str,
                  checkpointer=None, tools=None, concierge: bool = False,
-                 memory: TravelMemory | None = None):
+                 memory: TravelMemory | None = None, ablate: frozenset = frozenset()):
         self.llm, self.retriever, self.store = llm, retriever, store
         self.concierge = concierge  # research hotels and travel info after approval
         self.memory = memory  # long-term memory across trips (None: off)
+        # Evaluation only: switch a component off to measure what it contributes
+        # ("critic": accept the LLM's first draft; "food": skip the diet filter).
+        self.ablate = frozenset(ablate)
         self.small, self.big = small_model, big_model
         self.tools = tools or LocalTools()  # LocalTools (direct) or MCPTools (via MCP)
         self.graph = self._build(checkpointer or MemorySaver())
@@ -475,6 +478,9 @@ class TripPlanner:
         def food():
             out, notes = {}, []
             for dest, pools in state["candidates"].items():
+                if "food" in self.ablate:  # ablation: no diet filter
+                    out[dest] = pools["meals"]
+                    continue
                 kept, note = FoodAgent.filter(req, pools["meals"], diet)
                 out[dest] = kept
                 notes += [f"{DESTINATIONS[dest]['name']}: {note}"] if note else []
@@ -545,6 +551,8 @@ class TripPlanner:
         errors, warnings = validate_plan(
             state["plan"], state["entities"], req, self._season, centres,
             self._transfer)
+        if "critic" in self.ablate:  # ablation: the draft goes through unchecked
+            return {"errors": [], "warnings": warnings, "feedback": ""}
         update: TripState = {"errors": errors, "warnings": warnings,
                              "feedback": "; ".join(errors)}
         if errors and state["plan_attempts"] >= MAX_PLAN_ATTEMPTS:
