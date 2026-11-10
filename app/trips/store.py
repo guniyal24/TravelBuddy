@@ -1,8 +1,12 @@
-"""Saved trips, traveller profiles and booking-checklist state (SQLite).
+"""Saved trips, traveller profiles and booking-checklist state.
 
-Separate from the LangGraph checkpoint file: checkpoints hold in-flight graph state, this holds
-the user-facing records. On hosts with an ephemeral disk (Render free tier) the file is lost on
-redeploy unless a persistent disk is mounted at TRIPS_PATH.
+Separate from the LangGraph checkpoints: checkpoints hold in-flight graph state, this holds the
+user-facing records. The same SQL runs on two backends:
+
+  TripStore("postgresql://...")   Postgres (set DATABASE_URL), survives redeploys
+  TripStore("data/trips.sqlite")  SQLite file (default), or ":memory:" in tests
+
+On hosts with an ephemeral disk (Render free tier) the SQLite file is lost on every redeploy.
 """
 import json
 import sqlite3
@@ -10,16 +14,18 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS profiles (email TEXT PRIMARY KEY, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS trips (
-  trip_id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS trips_owner ON trips(owner, updated_at);
-CREATE TABLE IF NOT EXISTS checks (
-  trip_id TEXT NOT NULL, item_id TEXT NOT NULL, done INTEGER NOT NULL,
-  PRIMARY KEY (trip_id, item_id));
-"""
+from app.graph.persistence import is_postgres, make_pg_pool
+
+SCHEMA = [
+    "CREATE TABLE IF NOT EXISTS profiles (email TEXT PRIMARY KEY, data TEXT NOT NULL)",
+    """CREATE TABLE IF NOT EXISTS trips (
+      trip_id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS trips_owner ON trips(owner, updated_at)",
+    """CREATE TABLE IF NOT EXISTS checks (
+      trip_id TEXT NOT NULL, item_id TEXT NOT NULL, done INTEGER NOT NULL,
+      PRIMARY KEY (trip_id, item_id))""",
+]
 
 PROFILE_FIELDS = {"tier": str, "diet": str, "language": str, "origin": str,
                   "interests": list, "vulnerable_travellers": bool, "pace": str}
@@ -54,29 +60,68 @@ def clean_profile(data: dict) -> dict:
     return out
 
 
-class TripStore:
-    def __init__(self, path: str = ":memory:"):
+class _SQLite:
+    def __init__(self, path: str):
         if path != ":memory:":
             Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._db = sqlite3.connect(path, check_same_thread=False)
-        self._db.executescript(SCHEMA)
+
+    def query(self, sql: str, params: tuple = ()) -> list[tuple]:
+        with self._lock:
+            return self._db.execute(sql, params).fetchall()
+
+    def run(self, *statements: tuple[str, tuple]) -> None:
+        """Execute statements in one transaction."""
+        with self._lock, self._db:
+            for sql, params in statements:
+                self._db.execute(sql, params)
 
     def close(self) -> None:
         with self._lock:
             self._db.close()
 
+
+class _Postgres:
+    def __init__(self, url: str):
+        self._pool = make_pg_pool(url)
+
+    @staticmethod
+    def _sql(sql: str) -> str:
+        return sql.replace("?", "%s")  # our SQL never contains a literal '?'
+
+    def query(self, sql: str, params: tuple = ()) -> list[tuple]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(self._sql(sql), params).fetchall()
+        return [tuple(r.values()) for r in rows]  # the pool hands out dict rows
+
+    def run(self, *statements: tuple[str, tuple]) -> None:
+        with self._pool.connection() as conn, conn.transaction():
+            for sql, params in statements:
+                conn.execute(self._sql(sql), params)
+
+    def close(self) -> None:
+        self._pool.close()
+
+
+class TripStore:
+    def __init__(self, location: str = ":memory:"):
+        self._db = _Postgres(location) if is_postgres(location) else _SQLite(location)
+        self._db.run(*[(s, ()) for s in SCHEMA])
+
+    def close(self) -> None:
+        self._db.close()
+
     # ---- profiles ----
     def get_profile(self, email: str) -> dict:
-        with self._lock:
-            row = self._db.execute("SELECT data FROM profiles WHERE email=?", (email,)).fetchone()
-        return json.loads(row[0]) if row else {}
+        rows = self._db.query("SELECT data FROM profiles WHERE email=?", (email,))
+        return json.loads(rows[0][0]) if rows else {}
 
     def save_profile(self, email: str, data: dict) -> dict:
         clean = clean_profile(data)
-        with self._lock, self._db:
-            self._db.execute("INSERT OR REPLACE INTO profiles VALUES (?, ?)",
-                             (email, json.dumps(clean)))
+        self._db.run(("INSERT INTO profiles (email, data) VALUES (?, ?) "
+                      "ON CONFLICT (email) DO UPDATE SET data = excluded.data",
+                      (email, json.dumps(clean))))
         return clean
 
     def learn(self, email: str, request: dict) -> dict:
@@ -105,33 +150,32 @@ class TripStore:
         places = ", ".join(dict.fromkeys(names)) or "Uttarakhand"
         title = f"{req.get('days', '?')} days: {places}"
         now = _now()
-        with self._lock, self._db:
-            row = self._db.execute("SELECT created_at FROM trips WHERE trip_id=? AND owner=?",
-                                   (trip_id, owner)).fetchone()
-            self._db.execute(
-                "INSERT OR REPLACE INTO trips VALUES (?, ?, ?, ?, ?, ?)",
-                (trip_id, owner, title, row[0] if row else now, now, json.dumps(trip)))
+        # created_at is kept on update (a re-planned trip keeps its original date)
+        self._db.run((
+            "INSERT INTO trips (trip_id, owner, title, created_at, updated_at, data) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (trip_id) DO UPDATE SET "
+            "owner = excluded.owner, title = excluded.title, updated_at = excluded.updated_at, "
+            "data = excluded.data",
+            (trip_id, owner, title, now, now, json.dumps(trip))))
 
     def get_trip(self, trip_id: str) -> dict | None:
-        with self._lock:
-            row = self._db.execute(
-                "SELECT owner, title, created_at, data FROM trips WHERE trip_id=?",
-                (trip_id,)).fetchone()
-            done = {r[0] for r in self._db.execute(
-                "SELECT item_id FROM checks WHERE trip_id=? AND done=1", (trip_id,))}
-        if not row:
+        rows = self._db.query(
+            "SELECT owner, title, created_at, data FROM trips WHERE trip_id=?", (trip_id,))
+        if not rows:
             return None
-        trip = json.loads(row[3])
+        owner, title, created_at, data = rows[0]
+        done = {r[0] for r in self._db.query(
+            "SELECT item_id FROM checks WHERE trip_id=? AND done=1", (trip_id,))}
+        trip = json.loads(data)
         for item in trip.get("checklist", []):
             item["done"] = item["id"] in done
-        return {"trip_id": trip_id, "owner": row[0], "title": row[1], "created_at": row[2],
+        return {"trip_id": trip_id, "owner": owner, "title": title, "created_at": created_at,
                 **trip}
 
     def list_trips(self, owner: str) -> list[dict]:
-        with self._lock:
-            rows = self._db.execute(
-                "SELECT trip_id, title, created_at, updated_at FROM trips WHERE owner=? "
-                "ORDER BY updated_at DESC LIMIT 50", (owner,)).fetchall()
+        rows = self._db.query(
+            "SELECT trip_id, title, created_at, updated_at FROM trips WHERE owner=? "
+            "ORDER BY updated_at DESC LIMIT 50", (owner,))
         return [{"trip_id": r[0], "title": r[1], "created_at": r[2], "updated_at": r[3]}
                 for r in rows]
 
@@ -140,7 +184,7 @@ class TripStore:
         trip = self.get_trip(trip_id)
         if not trip or item_id not in {i["id"] for i in trip.get("checklist", [])}:
             return False
-        with self._lock, self._db:
-            self._db.execute("INSERT OR REPLACE INTO checks VALUES (?, ?, ?)",
-                             (trip_id, item_id, 1 if done else 0))
+        self._db.run(("INSERT INTO checks (trip_id, item_id, done) VALUES (?, ?, ?) "
+                      "ON CONFLICT (trip_id, item_id) DO UPDATE SET done = excluded.done",
+                      (trip_id, item_id, 1 if done else 0)))
         return True

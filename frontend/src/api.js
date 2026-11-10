@@ -56,6 +56,15 @@ export async function login(email, password) {
   store.set((await res.json()).access_token);
 }
 
+// True if the API answers /health within timeoutMs (free hosts sleep when idle).
+export async function ping(timeoutMs = 2500) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try { return (await fetch(BASE + "/health", { signal: ctl.signal })).ok; }
+  catch { return false; }
+  finally { clearTimeout(timer); }
+}
+
 // Try the app without an account: a short-lived guest token.
 export async function guestLogin() {
   const res = await request("/api/guest", { auth: false });

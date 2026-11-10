@@ -22,4 +22,6 @@ pyyaml
 mcp>=2
 langgraph
 langgraph-checkpoint-sqlite
+langgraph-checkpoint-postgres
+psycopg[binary,pool]
 fpdf2>=2.8

@@ -7,6 +7,7 @@ import Landing from "./components/Landing.jsx";
 import Logo from "./components/Logo.jsx";
 import MyTrips from "./components/MyTrips.jsx";
 import Profile from "./components/Profile.jsx";
+import ServerStatus from "./components/ServerStatus.jsx";
 import Trip from "./components/Trip.jsx";
 
 const TABS = [
@@ -59,6 +60,7 @@ export default function App() {
   if (!authed) {
     return (
       <>
+        <ServerStatus />
         <Landing onLogin={() => setAuthMode("login")} onRegister={() => setAuthMode("register")}
                  onGuest={tryAsGuest} guestBusy={guestBusy} />
         {authMode && (
@@ -72,6 +74,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <ServerStatus />
       <header className="appbar">
         <div className="container appbar-in">
           <Logo height={36} />
