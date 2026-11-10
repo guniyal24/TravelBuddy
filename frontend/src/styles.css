@@ -511,3 +511,4 @@ main > div[hidden] { display: none; }
 .wx { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--soft); color: var(--brand); white-space: nowrap; }
 .wx.wet { background: var(--warn-bg); color: var(--warn); }
 .wx em { font-weight: 600; opacity: .8; }
+.trace-usage { margin: 10px 0 0; padding-top: 8px; border-top: 1px dashed var(--border); color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }

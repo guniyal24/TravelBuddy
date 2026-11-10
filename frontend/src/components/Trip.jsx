@@ -37,6 +37,7 @@ export default function Trip({ onExpired, initialTrip }) {
   const [fromDay, setFromDay] = useState(1);
   const [reason, setReason] = useState("");
   const [trace, setTrace] = useState([]); // every agent step of this planning session
+  const [usage, setUsage] = useState(null); // tokens and cost so far, from the server
   const [since, setSince] = useState(0);
 
   useEffect(() => {
@@ -51,10 +52,11 @@ export default function Trip({ onExpired, initialTrip }) {
   // fn receives onEvent: the server streams each agent step while it works
   async function run(fn, { fresh = false } = {}) {
     setError(""); setStatus("busy"); setSince(Date.now());
-    if (fresh) setTrace([]);
+    if (fresh) { setTrace([]); setUsage(null); }
     const onEvent = (ev) => setTrace((t) => mergeEvents(t, ev));
     try {
       const r = await fn(onEvent);
+      if (r.usage) setUsage(r.usage);
       setTripId(r.trip_id);
       if (r.status === "waiting") { setPrompt(r.prompt); setStatus("waiting"); }
       else {
@@ -78,7 +80,7 @@ export default function Trip({ onExpired, initialTrip }) {
   const how = trace.length > 0 && (
     <details className="trace-wrap">
       <summary><Icon name="spark" size={16} /> See how {agents} AI and rule-based agents built this</summary>
-      <AgentTrace steps={trace} title="Agent trace" />
+      <AgentTrace steps={trace} title="Agent trace" usage={usage} />
     </details>
   );
   const pick = (name) => setText(`3 day trip to ${name} for 2 people in ${MONTHS[new Date().getMonth()]}, mid-range stay`);
@@ -109,7 +111,7 @@ export default function Trip({ onExpired, initialTrip }) {
               English, Hindi and Hinglish all work.
             </p>
             <div className="prompt-box">
-              <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)}
+              <textarea rows={3} maxLength={1500} value={text} onChange={(e) => setText(e.target.value)}
                         placeholder={EXAMPLE} aria-label="Describe your trip" />
               <div className="prompt-foot">
                 <div className="chips tight" aria-label="Examples">
@@ -163,7 +165,7 @@ export default function Trip({ onExpired, initialTrip }) {
           <span className="icon-chip"><Icon name="chat" size={20} /></span>
           <h2>One more thing</h2>
           <p>{prompt.message}</p>
-          <input value={answer} onChange={(e) => setAnswer(e.target.value)} autoFocus
+          <input value={answer} maxLength={1500} onChange={(e) => setAnswer(e.target.value)} autoFocus
                  placeholder="e.g. 2 people in November" aria-label="Your answer" />
           <button className="primary lg" disabled={!answer.trim()}>Continue <Icon name="arrow" size={18} /></button>
         </form>
@@ -203,7 +205,7 @@ export default function Trip({ onExpired, initialTrip }) {
               <button className="link danger" onClick={() => reply({ action: "cancel" })}>Cancel</button>
             </div>
             <form className="change" onSubmit={(e) => { e.preventDefault(); change.trim() && reply({ action: "edit", text: change.trim() }); }}>
-              <input value={change} onChange={(e) => setChange(e.target.value)}
+              <input value={change} maxLength={1500} onChange={(e) => setChange(e.target.value)}
                      placeholder="Or ask for a change, e.g. less walking, add a yoga class"
                      aria-label="Requested change" />
               <button disabled={!change.trim()}>Update plan</button>
@@ -237,7 +239,7 @@ export default function Trip({ onExpired, initialTrip }) {
                     ))}
                   </select>
                 </label>
-                <input value={reason} onChange={(e) => setReason(e.target.value)}
+                <input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)}
                        placeholder="e.g. heavy rain forecast, bus cancelled, want fewer temples"
                        aria-label="What changed" />
                 <button className="primary" disabled={!reason.trim()}>Re-plan</button>

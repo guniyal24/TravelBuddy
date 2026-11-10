@@ -82,6 +82,7 @@ jobs:
       - run: python -m eval.gate
       - run: python -m eval.plans
       - run: python -m eval.gate --plans
+      - run: python -m eval.redteam  # exits non-zero if any attack succeeds
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -89,6 +90,7 @@ jobs:
           path: |
             eval/RESULTS.md
             eval/PLANS.md
+            eval/REDTEAM.md
             eval/results/*.json
 
   deploy:

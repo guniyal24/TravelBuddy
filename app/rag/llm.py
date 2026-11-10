@@ -12,6 +12,8 @@ import time
 
 import openai
 
+from app import usage as usage_meter
+
 log = logging.getLogger(__name__)
 RETRYABLE = (openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError,
              openai.InternalServerError)
@@ -51,11 +53,13 @@ class LLM:
             kwargs["max_tokens"] = max_tokens
         resp = self._create(kwargs)
         usage = getattr(resp, "usage", None)
+        pt = (usage.prompt_tokens or 0) if usage else 0
+        ct = (usage.completion_tokens or 0) if usage else 0
         with self._lock:
             self.calls += 1
-            if usage:
-                self.prompt_tokens += usage.prompt_tokens or 0
-                self.completion_tokens += usage.completion_tokens or 0
+            self.prompt_tokens += pt
+            self.completion_tokens += ct
+        usage_meter.record(model, pt, ct)  # into the current trip's meter, if one is open
         return (resp.choices[0].message.content or "").strip()
 
     def json(self, model: str, messages: list[dict], default: dict | None = None,

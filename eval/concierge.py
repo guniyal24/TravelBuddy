@@ -58,6 +58,7 @@ def main() -> None:
     from app.graph.concierge import HotelAgent
     from app.rag.factory import build_llm_clients
     from app.rag.llm import LLM
+    from app.usage import metered
     from mcp_server.client import LocalTools
 
     s = Settings()
@@ -75,7 +76,10 @@ def main() -> None:
         if not pool:
             continue
         town = {"name": meta["name"], "lat": meta["lat"], "lon": meta["lon"]}
-        found = agent.research(dest, town, pool, {"tier": "mid", "days": 3, "people": 2}, None)
+        with metered() as meter:
+            found = agent.research(dest, town, pool, {"tier": "mid", "days": 3, "people": 2},
+                                   None)
+        found["usage"] = meter.summary()
         towns.append(found)
         print(f"{meta['name']}: {len(found['options'])} hotels, {found['reviews_read']} reviews, "
               f"{found['verified']}/{found['claims']} claims kept")
@@ -97,7 +101,10 @@ def main() -> None:
              "| analyst claims whose quote was found in the cited review | "
              f"{fmt_rate(kept, claims)} |",
              f"| Spearman: analyst aspect score vs Google star rating | "
-             f"{f'{rho:.2f} over {len(pairs)} hotels' if rho is not None else 'n/a'} |", "",
+             f"{f'{rho:.2f} over {len(pairs)} hotels' if rho is not None else 'n/a'} |",
+             f"| LLM cost per town researched (median) | "
+             f"₹{statistics.median(t['usage']['cost_inr'] for t in towns):.2f}, plus "
+             f"{args.per_town} Google Places calls |", "",
              "Claims that fail the quote check are dropped before a traveller sees them, so the "
              "survival rate measures how often the analyst paraphrases or invents; it is not an "
              "error rate of what is shown. Ranking is computed in code (rating shrunk toward "

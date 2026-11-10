@@ -131,11 +131,24 @@ judgement is incomplete.
 
 ## Engineering
 
-- **240 tests** (pytest), ruff, CI on every push, storage tests against real Postgres in CI.
-- Guardrails: per-user and guest rate limits (Redis, in-memory fallback), JWT auth, CORS,
-  guest sessions capped per IP and per day.
-- Graceful degradation: tool failures become "unknown", never invented values; a rule-based
-  fallback plan if the LLM cannot produce a valid one in 3 attempts.
+- **Cost and speed, measured:** a trip costs about **₹0.01 in LLM fees** at the median
+  (₹0.04 at the 90th percentile) and the agents take **17 s** at the median to produce a
+  plan ready for review ([`eval/PLANS.md`](eval/PLANS.md)). Every run is metered per model
+  (`app/usage.py`), saved per trip, and published in aggregate at `GET /api/stats`; the live
+  trace shows each trip's calls, tokens and cost. Hindi and Hinglish output is translated in
+  parallel sections, about 5x faster than one long call (17.6 s to 3.6 s median).
+- **Red team: 13 of 13 attacks defended** on the live system (prompt extraction, secrets,
+  other users' data, jailbreaks, fake context, HTML injection, planner injection;
+  [`eval/REDTEAM.md`](eval/REDTEAM.md)), checked in code wherever possible and gated in CI.
+- **258 tests** (pytest), ruff, CI on every push, storage tests against real Postgres in CI.
+- Guardrails: size limits on every request, per-user and guest rate limits (Redis, in-memory
+  fallback), JWT auth, CORS, guest sessions capped per IP and per day, daily caps on Google and
+  web-search calls.
+- Graceful degradation: tool failures become "unknown", never invented values; a store outage
+  stops planning with a clear message instead of an empty plan; a rule-based fallback plan if
+  the LLM cannot produce a valid one in 3 attempts.
+- Observability: the live agent trace and per-trip usage are built in; every LLM call can also
+  be traced to Langfuse by setting its keys (optional, not exercised in this repo's tests).
 - Data pipeline (`ingest/`) with provenance and confidence on every fact, and licence-aware
   handling of Google-sourced data.
 

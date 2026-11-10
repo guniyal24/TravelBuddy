@@ -20,6 +20,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 from app.cost.pricing import parse_price_range
+from app.usage import in_context
 from mcp_server.client import ToolError
 
 log = logging.getLogger(__name__)
@@ -191,7 +192,7 @@ class HotelAgent:
                     "analysis": analysis}
 
         with ThreadPoolExecutor(max_workers=HOTELS_PER_TOWN) as ex:
-            options = list(ex.map(one, pool))
+            options = list(ex.map(in_context(one), pool))
         ranked = rank_options(options, req)
         return {"dest": dest, "town": town["name"], "current": current, "options": ranked,
                 "reviews_read": sum(len(o["reviews"]) for o in options),
