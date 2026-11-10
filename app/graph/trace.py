@@ -67,6 +67,8 @@ def _end(node: str, state: dict, out: dict) -> tuple[str, list[str], str] | None
                 _month(req.get("month")), f"{req.get('tier')} tier" if req.get("tier") else None,
                 req.get("diet") or None]
         details = []
+        if req.get("places"):
+            details.append("Towns you named: " + ", ".join(pretty(p) for p in req["places"]))
         if req.get("interests"):
             details.append("Interests: " + ", ".join(req["interests"]))
         if req.get("origin"):

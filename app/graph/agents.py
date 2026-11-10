@@ -11,6 +11,8 @@ plan after the Critic accepts it.
   TransportAgent  road options from the origin and between destinations (get_transport tool)
   SafetyAgent     altitude / acclimatisation, high-altitude health, permits and advisories
 """
+import re
+
 from app.cost.pricing import parse_price_range
 from mcp_server.client import ToolError
 
@@ -22,7 +24,11 @@ APPROX_ELEVATION_M = {
     "destination_badrinath": 3300, "destination_kedarnath": 3580,
 }
 HIGH_TOWN_M = 2500
-NON_VEG_WORDS = ("non-veg", "non veg", "nonveg", "chicken", "mutton", "fish", "meat", "egg ")
+# Whole-word matches only, so "Barista" or "Fishtail Cafe" style names do not trip "bar"/"fish".
+# Bars and pubs count too: a vegetarian traveller asking for veg food rarely wants one.
+NON_VEG = re.compile(
+    r"(?<![a-z])(non[- ]?veg|chicken|mutton|fish|meat|eggs?|kebabs?|kababs?|seekh|prawns?|"
+    r"pork|beef|lamb|seafood|bar|pub|brewery|tavern)(?![a-z])")
 VEG_WORDS = ("pure veg", "vegetarian", "veg only", "vegan", "jain")
 BUDGET_SHARE_FOR_STAYS = 0.4  # of the traveller's total budget
 
@@ -54,15 +60,19 @@ class StayAgent:
 class FoodAgent:
     @staticmethod
     def filter(req: dict, meals: list[dict], diet: str) -> tuple[list[dict], str]:
+        if not meals:
+            return meals, ("No eateries are listed for this town in our data yet; ask your "
+                           "stay or locals where to eat.")
         if diet != "veg":
             return meals, ""
-        keep = [e for e in meals if not any(w in _text(e) for w in NON_VEG_WORDS)]
+        keep = [e for e in meals if not NON_VEG.search(_text(e))]
         keep.sort(key=lambda e: not any(w in _text(e) for w in VEG_WORDS))
         if not keep:  # never leave the planner with nothing: say so instead
             return meals, ("No eatery clearly suitable for vegetarians was found in the data; "
                            "confirm the menu before you go.")
         removed = len(meals) - len(keep)
-        return keep, (f"{removed} eatery listing(s) mentioning meat or fish were left out "
+        noun = "listing" if removed == 1 else "listings"
+        return keep, (f"{removed} eatery {noun} mentioning meat, fish or a bar were left out "
                       "(based on listing text; confirm menus)." if removed else "")
 
 

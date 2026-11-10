@@ -50,6 +50,11 @@ def validate_plan(plan: dict, entities: dict[str, dict], request: dict, season_f
                     errors.append(f"Day {n}: unknown id {i!r} (only use ids from the candidates).")
                 elif ent.get("type") not in allowed:
                     errors.append(f"Day {n}: {i} is a {ent.get('type')}, not allowed in {key}.")
+                elif ent.get("destination_id") and ent["destination_id"] != d.get("destination"):
+                    errors.append(f"Day {n}: {i} ({ent.get('name', i)}) is in "
+                                  f"{pretty(ent['destination_id'])}, not "
+                                  f"{pretty(d.get('destination', ''))}; use only that day's "
+                                  "destination.")
                 elif key == "stops" and i in seen_stops:
                     errors.append(f"Day {n}: {i} is already visited on an earlier day.")
                 seen_stops.add(i) if key == "stops" else None
