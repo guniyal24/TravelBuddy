@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     guest_token_expire_minutes: int = 24 * 60
     guest_sessions_per_ip_per_hour: int = 10
     guest_sessions_per_day: int = 300  # global cap: holds even if a client spoofs its IP
+    # Postgres URL (e.g. Neon). When set, trip state, saved trips and profiles live there and
+    # survive redeploys; the two SQLite paths below are then unused.
+    database_url: str = ""
     checkpoint_path: str = "data/checkpoints.sqlite"  # durable trip state
     trips_path: str = "data/trips.sqlite"  # saved trips, profiles, checklist state
     mcp_transport: str = "memory"  # "memory" (in-process MCP) or "stdio" (subprocess server)

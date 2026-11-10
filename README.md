@@ -1,90 +1,157 @@
-# TravelBuddy (DevBhoomi Planner)
+<p align="center"><img src="frontend/public/logo.png" alt="TravelBuddy" height="64"></p>
 
-An agentic, end-to-end trip assistant for Uttarakhand (Devbhoomi, "land of the gods"): weather and season checks, a
-validated day-by-day itinerary, cost estimate, assisted booking, and a live companion,
-with a human decision at every step that costs money or affects safety.
+<h3 align="center">An AI trip planner for Uttarakhand that shows its work</h3>
 
-**Status: Phase 0 (foundation).** Ported from the VietBot prototype and cleaned up.
+<p align="center">
+  <b>Live demo:</b> <i>coming soon</i> · try it as a guest, no sign-up ·
+  <a href="#evaluation">Evaluation</a> · <a href="#architecture">Architecture</a> · <a href="DEPLOY.md">Deploy</a>
+</p>
 
-## Roadmap
+![CI](https://github.com/guniyal24/TravelBuddy/actions/workflows/ci.yml/badge.svg)
 
-| Phase | Output |
+---
+
+Describe a trip in plain English, Hindi or Hinglish (*"Nainital aur Almora, 4 din, vegetarian
+khana, 2 log, December"*). TravelBuddy proposes circuits that fit the season, builds a
+day-by-day plan from **real listings only**, checks it with rule-based agents, prices it as an
+honest range, and **waits for your approval** before anything is final. You can watch every
+agent work, live.
+
+## The problem
+
+Generic chatbots plan hill trips confidently and wrongly. In this project's own evaluation, an
+LLM without retrieval **named places that are not in the data in 85% of answers** and invented
+prices or timings for every question it could not answer. In the mountains that costs real money
+and can be unsafe (altitude, monsoon roads, Char Dham registration).
+
+TravelBuddy's rule: **the LLM composes, code checks, the human decides.**
+
+## What it does
+
+| | |
 |---|---|
-| 0 | Clean structure, bug fixes, tests, Docker, CI (this commit) |
-| 0.5 / 1 | Uttarakhand data pipeline (`ingest/`, `data/`) |
-| 2 | Self-RAG as a LangGraph + eval baseline (`eval/`) |
-| 3 | MCP server, cost engine, fare adapters (`mcp_server/`, `app/cost`, `app/rules`) |
-| 4 | Multi-agent trip graph with human-in-the-loop interrupts (`app/graph`) |
-| 5 | Trip persistence, monitor, companion |
-| 6 | Frontend |
-| 7 | CI/CD eval gate, deploy |
+| **Plans from a knowledge graph** | 333 sourced listings (Wikivoyage, OpenStreetMap) in Neo4j + Pinecone. The planner may only use ids it was given; a Critic rejects anything else. |
+| **Human in the loop** | Pick a circuit, approve or ask for changes ("less walking", "add a yoga class"), re-plan mid-trip from any day. Paused plans survive server restarts. |
+| **Live agent trace** | Each agent's real work streams to the UI (Server-Sent Events): what it found, what the Critic rejected, timings. |
+| **Safety agent** | Altitude-gain rules, high-altitude health notes, monthly advisories with official links to confirm. |
+| **Honest costs** | Ranges, never single numbers; every line says if it is a listing price or an assumption. |
+| **Grounded Q&A** | Self-RAG answers with citations, and declines instead of guessing. |
+| **Hindi / Hinglish** | Requests, plans and answers follow the traveller's language. |
+| **Try without an account** | One-click guest mode with per-IP and daily cost caps. |
+| **Export & offline** | WhatsApp text, PDF, calendar (.ics), booking checklist; opened trips work offline (PWA). |
 
-## Travel-buddy features
+## Architecture
 
-- **Specialist agents.** After research a supervisor step runs Stay, Food and Transport agents in
-  parallel; a Safety agent reviews the validated plan (altitude and acclimatisation, high-altitude
-  health, Char Dham registration and other advisories). All are deterministic and tested; the LLM
-  only composes the plan.
-- **Memory.** Preferences (budget, diet, pace, language, origin, interests) are stored per user
-  and used as defaults; the planner learns from approved trips and never overrides what you set.
-- **Mid-trip re-planning.** `POST /api/trips/{id}/replan` keeps the days already done, re-plans the
-  rest with your reason (rain, cancelled bus...), re-validates it and asks for approval again.
-- **Hindi / Hinglish.** Requests, prompts, itineraries and chat answers follow the traveller's
-  language. The PDF and WhatsApp summary are English (the PDF font is Latin-1 only).
-- **Timeline and map.** A suggested time-of-day schedule and a Leaflet/OpenStreetMap map.
-- **Export.** WhatsApp text, PDF and calendar (.ics); a booking checklist whose ticks are saved.
-- **Offline.** The app shell is cached by a service worker and opened trips are kept in the
-  browser, so an itinerary opens without signal (map tiles need a connection).
-- Saved trips, profiles and ticks live in SQLite at `TRIPS_PATH` (default `data/trips.sqlite`);
-  like the checkpoint file it needs a persistent disk on hosts that wipe storage on redeploy.
+```mermaid
+flowchart LR
+    U([Traveller]) -->|free text| I[Intake<br/><i>LLM + code</i>]
+    I -->|missing details?| U
+    I --> A[Advisor<br/><i>season + named towns</i>]
+    A -->|choose circuit| U
+    A --> R[Research<br/><i>hybrid retrieval</i>]
+    R --> S{{Supervisor}}
+    S --> ST[Stay agent]
+    S --> FD[Food agent]
+    S --> TR[Transport agent]
+    ST & FD & TR --> P[Planner<br/><i>LLM</i>]
+    P --> C[Critic<br/><i>rules</i>]
+    C -->|errors, retry| P
+    C --> SF[Safety agent]
+    SF --> CO[Cost engine]
+    CO -->|approve / edit / cancel| U
+    U -->|approve| F[Booking checklist]
 
-## Architecture notes
-
-- **Self-RAG** (`app/rag/self_rag.py`): retrieve, grade, rewrite, answer, verify, or decline.
-- **Trip planner** (`app/graph/`): LangGraph multi-agent flow with human approval steps. Trip state
-  is durable (SQLite checkpointer), so a plan paused for a decision survives a server restart.
-- **MCP**: the planner calls its tools (budget, season, altitude, weather) through a real MCP
-  client. `MCP_TRANSPORT=memory` runs the server in-process; `stdio` launches it as a subprocess.
-  The same server can be used by any MCP host: `python -m mcp_server.server`.
-
-## Layout
-
+    subgraph MCP["Own MCP server"]
+      T1[estimate_budget] ~~~ T2[check_season] ~~~ T3[check_altitude_plan]
+      T4[get_weather] ~~~ T5[get_transport] ~~~ T6[check_conditions]
+    end
+    TR & SF & CO -.tools.-> MCP
 ```
-app/api      FastAPI routes, auth, rate limiting
-app/db       Neo4j store
-app/rag      Hybrid RAG (Phase 2 turns this into Self-RAG)
-app/graph    LangGraph trip graph (Phase 4)
-app/cost     Deterministic cost engine (Phase 3)
-app/rules    Season / altitude / permit validators (Phase 3)
-mcp_server/  Own MCP server (Phase 3)
-ingest/      Data pipeline (Phase 1)
-data/        Curated, sourced data (bus routes, gateways, dishes, permits)
-eval/        Golden queries and metrics
-tests/
-```
+
+- **LangGraph** state machine with `interrupt()` for human decisions and a durable checkpointer
+  (Postgres in production, SQLite locally).
+- **Multi-agent:** Stay, Food and Transport agents run in parallel; the Critic, Safety agent
+  and cost engine are deterministic code, so their output is testable.
+- **MCP:** the planner reaches its tools through a real MCP client, in-process or over stdio.
+  The same server works in any MCP host: `python -m mcp_server.server`.
+- **Self-RAG** for Q&A: retrieve → grade → rewrite → answer → verify grounding → or decline.
+- **Hybrid retrieval:** Pinecone vectors (bge-m3) + Neo4j graph context.
+
+## Evaluation
+
+25-question golden set (20 answerable, 5 deliberately unanswerable), three systems, same judge:
+
+| System | Retrieval hit@k | Names places not in data ↓ | Answers the question | Declines when it should | Invents specifics ↓ | Latency |
+|---|---|---|---|---|---|---|
+| LLM only | n/a | **85%** | 100% | 0% | **100%** | 27.5 s |
+| Plain RAG | 95% | 0% | 55% | 100% | 0% | 5.3 s |
+| **Self-RAG** | **96%** | 4% | **100%** | **100%** | **0%** | 7.2 s |
+
+Self-RAG keeps the grounding of plain RAG while answering every answerable question.
+**CI quality gate:** `eval/gate.py` fails the build if these regress. Full results:
+[`eval/RESULTS.md`](eval/RESULTS.md).
+
+*Known limitation, being worked on:* the judge is a single LLM call. The next step is a
+checklist-based jury with measured agreement against human labels (Cohen's kappa) and run-to-run
+stability.
+
+## Engineering
+
+- **171 tests** (pytest), ruff, CI on every push, storage tests against real Postgres in CI.
+- Guardrails: per-user and guest rate limits (Redis, in-memory fallback), JWT auth, CORS,
+  guest sessions capped per IP and per day.
+- Graceful degradation: tool failures become "unknown", never invented values; a rule-based
+  fallback plan if the LLM cannot produce a valid one in 3 attempts.
+- Data pipeline (`ingest/`) with provenance and confidence on every fact, and licence-aware
+  handling of Google-sourced data.
+
+## Tech stack
+
+LangGraph · MCP · Self-RAG · Neo4j · Pinecone · DeepInfra (Mistral Small, Llama 3.3 70B judge,
+bge-m3 embeddings) · FastAPI · Postgres · Redis · React + Vite · Leaflet · GitHub Actions ·
+Docker · Render · Vercel
 
 ## Run locally
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env   # fill in keys
+cp .env.example .env            # add your keys
 pytest -q
-uvicorn app.api.asgi:app --reload
+uvicorn app.api.asgi:app --reload --port 8000
+
+cd frontend && npm install && npm run dev   # http://localhost:5173
 ```
 
-## Fixed from the prototype
+Optional: `TEST_DATABASE_URL=postgresql://...` runs the storage tests against Postgres too.
+To rebuild the knowledge base: `python -m ingest.build`, then `python -m ingest.load neo4j` and
+`python -m ingest.load pinecone`. Deploying: see [DEPLOY.md](DEPLOY.md).
 
-- Rate limiter swallowed its own 429 inside a broad `except`; now only Redis errors fail open.
-- Redis host was hardcoded; now configurable.
-- `<thinking>` instruction leaked reasoning into replies; removed.
-- `SECRET_KEY` missing caused a runtime crash; now validated at startup.
-- Deprecated `on_event` and `datetime.utcnow` replaced (lifespan, timezone-aware UTC).
-- Services were created at import time; now created in the lifespan, so tests use fakes.
+## Layout
 
-## Data
+```
+app/api      FastAPI routes, auth, guest mode, rate limits, SSE streaming
+app/graph    LangGraph trip planner, agents, Critic, live trace
+app/rag      Self-RAG and hybrid retrieval
+app/rules    Season, altitude and advisory checks
+app/cost     Deterministic cost engine
+app/trips    Saved trips and profiles (SQLite or Postgres)
+mcp_server/  Own MCP server and client
+ingest/      Data pipeline: Wikivoyage, OpenStreetMap, Open-Meteo
+eval/        Golden set, metrics, CI gate
+frontend/    React app (PWA)
+```
 
-`data/processed/` is generated and git-ignored: run `python -m ingest.build` to produce it
-(add `--google` with `GOOGLE_PLACES_API_KEY` set to fill remaining coordinates).
-Google-sourced coordinates are subject to Google's terms and must not be committed or
-published. Sources: Wikivoyage (CC BY-SA 4.0), OpenStreetMap contributors (ODbL), Open-Meteo.
+## Roadmap
+
+1. Reliable LLM-as-judge: checklists, a multi-model jury, human-label agreement.
+2. Concierge stage: after approval, parallel agents research hotels (reviews) and live travel
+   info, with every claim cited and verified.
+3. Agent memory across trips, user-visible and deletable.
+4. Real travel dates with live weather, more towns, road routing.
+
+## Data and licences
+
+Wikivoyage (CC BY-SA 4.0), OpenStreetMap contributors (ODbL), Open-Meteo. Generated data in
+`data/processed/` is git-ignored. Google-sourced coordinates are never committed or published.
+A planning aid only: check weather, road and permit advisories before you travel.

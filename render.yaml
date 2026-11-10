@@ -1,16 +1,18 @@
-# Render blueprint: a Docker web service. Set the secrets in the Render dashboard.
+# Render blueprint: the API as a Docker web service. Secrets are set in the Render dashboard
+# (sync: false means "ask me"). See DEPLOY.md for the full walkthrough.
+#
+# Storage: set DATABASE_URL to a Postgres database (a free Neon project works). Trip state,
+# saved trips and profiles then survive redeploys and free-tier restarts. Without it the API
+# falls back to SQLite on the instance's ephemeral disk, which is wiped on every deploy.
 services:
   - type: web
-    name: uttarakhand-planner-api
+    name: travelbuddy-api
     runtime: docker
+    plan: free
     healthCheckPath: /health
-    # Trip state is stored in SQLite at CHECKPOINT_PATH. Free instances have ephemeral disks, so
-    # in-progress trips are lost on redeploy. On a paid plan, mount a disk and point there:
-    # disk: {name: trips, mountPath: /srv/data/state, sizeGB: 1}
-    # then set CHECKPOINT_PATH=/srv/data/state/checkpoints.sqlite
-    # and TRIPS_PATH=/srv/data/state/trips.sqlite (saved trips, profiles, checklist ticks)
     envVars:
       - {key: SECRET_KEY, generateValue: true}
+      - {key: DATABASE_URL, sync: false}
       - {key: DEEPINFRA_API_KEY, sync: false}
       - {key: PINECONE_API_KEY, sync: false}
       - {key: PINECONE_INDEX_NAME, value: uttarakhand-trip-planner}
@@ -18,4 +20,8 @@ services:
       - {key: NEO4J_USER, sync: false}
       - {key: NEO4J_PASSWORD, sync: false}
       - {key: NEO4J_DATABASE, value: neo4j}
+      # The deployed frontend's origin, e.g. https://travelbuddy.vercel.app
       - {key: CORS_ORIGINS, sync: false}
+      # Guest mode (try without an account) and its cost guards
+      - {key: GUEST_ENABLED, value: "true"}
+      - {key: GUEST_SESSIONS_PER_DAY, value: "300"}

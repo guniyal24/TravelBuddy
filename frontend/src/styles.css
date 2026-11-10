@@ -464,3 +464,9 @@ main > div[hidden] { display: none; }
 }
 .lnav-cta button { white-space: nowrap; }
 @media (max-width: 560px) { .lnav-cta button { padding: 10px 14px; } .logo-img { max-height: 40px; } }
+
+/* cold-start notice (free hosting sleeps when idle) */
+.server-status { position: sticky; top: 0; z-index: 60; display: flex; gap: 10px; align-items: center; justify-content: center;
+  padding: 10px 16px; background: var(--warn-bg); color: var(--warn); font-weight: 700; font-size: 14.5px; text-align: left; }
+.server-status .mini-spin { flex: none; }
+@media print { .server-status { display: none !important; } }

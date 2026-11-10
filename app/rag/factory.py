@@ -36,5 +36,5 @@ def build_trip_planner(s: Settings, store: GraphStore, redis_client=None):
     index = Pinecone(api_key=s.pinecone_api_key).Index(s.pinecone_index_name)
     retriever = Retriever(embed, index, s.embed_model, redis_client)
     return TripPlanner(LLM(chat), retriever, store, s.router_model, s.planner_model,
-                       checkpointer=make_checkpointer(s.checkpoint_path),
+                       checkpointer=make_checkpointer(s.checkpoint_path, s.database_url),
                        tools=MCPTools(s.mcp_transport))

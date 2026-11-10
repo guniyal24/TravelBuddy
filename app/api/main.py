@@ -77,13 +77,15 @@ async def lifespan(app: FastAPI):
     if not hasattr(app.state, "store"):
         from app.db.graph import GraphStore
         from app.rag.factory import build_self_rag, build_trip_planner
-        from app.rag.hybrid import HybridRAG
 
         s: Settings = app.state.settings
         app.state.store = GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database)
         redis_client = connect_redis(s.redis_host, s.redis_port)
         app.state.limiter = RateLimiter(redis_client, s.rate_limit_per_minute)
         if s.rag_mode == "hybrid":
+            # imported only when used: it loads a re-ranking model (heavy on a 512 MB instance)
+            from app.rag.hybrid import HybridRAG
+
             app.state.rag = HybridRAG(s, app.state.store, redis_client)
         else:
             app.state.rag = build_self_rag(s, app.state.store, redis_client)
@@ -91,12 +93,17 @@ async def lifespan(app: FastAPI):
     if not hasattr(app.state, "trips"):
         from app.trips.store import TripStore
 
-        app.state.trips = TripStore(app.state.settings.trips_path)
+        s = app.state.settings
+        app.state.trips = TripStore(s.database_url or s.trips_path)
     yield
     planner = getattr(app.state, "planner", None)
     tools = getattr(planner, "tools", None)
     if tools is not None and hasattr(tools, "close"):
         tools.close()
+    if planner is not None and hasattr(planner, "graph"):
+        from app.graph.persistence import close_checkpointer
+
+        close_checkpointer(getattr(planner.graph, "checkpointer", None))
     store = getattr(app.state, "store", None)
     if store is not None and hasattr(store, "close"):
         store.close()
