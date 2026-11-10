@@ -31,7 +31,7 @@ class FakeLLM:
 
 
 class FakeRetriever:
-    def search(self, query, top_k=12, filter=None):
+    def search(self, query, top_k=12, filter=None, **kw):
         city = filter["city"]
         types = filter["type"]["$in"]
         dest = HW if city == "Haridwar" else RK

@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # reasoning/planner: fast Mistral-Small; judge: pinned 70B so eval scores stay comparable
     reasoning_model: str = "mistralai/Mistral-Small-3.2-24B-Instruct-2506"
     judge_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    # Eval jury (judge v2): three model families, none from the generator's (Mistral) family,
+    # so no judge grades its own family's writing. Pinned so scores stay comparable over time.
+    judge_jury: str = ("meta-llama/Llama-3.3-70B-Instruct-Turbo,Qwen/Qwen2.5-72B-Instruct,"
+                       "google/gemma-3-27b-it")
+    judge_samples: int = 3  # verdicts sampled per juror (majority vote)
+    judge_temperature: float = 0.7  # sampling temperature for those verdicts
     planner_model: str = "mistralai/Mistral-Small-3.2-24B-Instruct-2506"
 
     # Redis (cache + rate limit)

@@ -12,13 +12,14 @@ from datetime import date
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 
 from app.api import security
 from app.api.ratelimit import RateLimiter, RateLimitExceeded, connect_redis
 from app.config import Settings, get_settings
+from app.graph.trip_graph import PlanningUnavailable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger(__name__)
@@ -124,6 +125,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(PlanningUnavailable)
+    async def planning_unavailable(request: Request, exc: PlanningUnavailable):
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     # --- dependencies ---
     async def current_user(request: Request, token: str = Depends(oauth2_scheme)) -> dict:
@@ -258,7 +263,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 result = run(on_event=lambda ev: events.put({"type": "progress", **ev}))
                 events.put({"type": "result", **_trip_response(request, trip_id, result, owner)})
-            except ValueError as exc:
+            except (ValueError, PlanningUnavailable) as exc:  # messages safe to show
                 events.put({"type": "error", "detail": str(exc)})
             except Exception:
                 log.exception("trip run failed trip=%s", trip_id)
