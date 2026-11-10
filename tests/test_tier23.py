@@ -224,8 +224,10 @@ def test_translation_work_is_not_repeated_when_the_graph_resumes():
     tp.start("n1", "x")
     tp.resume("n1", BOTH)
     tp.resume("n1", {"action": "approve"})
-    # choose message, review text, approve message, booking links: once each
-    assert sum(p.startswith("TRANSLATE:") for p in llm.prompts) == 4
+    # choose message, review text, approve message, booking links: each piece exactly once
+    # (long texts are split into sections translated in parallel, so count pieces, not calls)
+    pieces = [p for p in llm.prompts if p.startswith("TRANSLATE:")]
+    assert len(pieces) >= 4 and len(pieces) == len(set(pieces))
 
 
 def test_learning_remembers_diet_and_language_but_not_over_explicit_values():

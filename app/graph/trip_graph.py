@@ -43,6 +43,7 @@ from app.graph.trace import Tracer
 from app.memory import TravelMemory, extract_preferences, trip_episode
 from app.rag.retriever import RetrievalError
 from app.towns import CIRCUITS, DESTINATIONS, NOT_READY, PLACE_ALIASES  # noqa: F401
+from app.usage import Meter, in_context, metered
 from mcp_server.client import LocalTools, ToolError
 
 log = logging.getLogger(__name__)
@@ -72,6 +73,36 @@ def named_places(text: str) -> list[str]:
     text = (text or "").lower()
     found = [(m.start(), d) for d, rx in _PLACE_RES.items() if (m := rx.search(text))]
     return [d for _, d in sorted(found)]
+
+
+def split_sections(text: str, min_chars: int = 600) -> list[str]:
+    """Split markdown at '## ' headings into sections worth translating separately; short
+    texts stay whole. Joining the parts with blank lines restores the document."""
+    if len(text) < min_chars:
+        return [text]
+    parts, cur = [], []
+    for line in text.splitlines():
+        if line.startswith("## ") and cur:
+            parts.append("\n".join(cur).strip("\n"))
+            cur = []
+        cur.append(line)
+    if cur:
+        parts.append("\n".join(cur).strip("\n"))
+    return [p for p in parts if p.strip()] or [text]
+
+
+def split_lines(section: str, max_chars: int = 300) -> list[str]:
+    """Split one section into groups of whole lines of at most ~max_chars, so no single slow
+    piece dominates a parallel translation. Joining with newlines restores the section."""
+    groups, cur = [], []
+    for line in section.splitlines():
+        if cur and sum(len(x) + 1 for x in cur) + len(line) > max_chars:
+            groups.append("\n".join(cur))
+            cur = []
+        cur.append(line)
+    if cur:
+        groups.append("\n".join(cur))
+    return groups or [section]
 
 
 def _route_order(places: list[str]) -> list[str]:
@@ -194,10 +225,13 @@ class TripState(TypedDict, total=False):
 class TripPlanner:
     def __init__(self, llm, retriever, store, small_model: str, big_model: str,
                  checkpointer=None, tools=None, concierge: bool = False,
-                 memory: TravelMemory | None = None):
+                 memory: TravelMemory | None = None, ablate: frozenset = frozenset()):
         self.llm, self.retriever, self.store = llm, retriever, store
         self.concierge = concierge  # research hotels and travel info after approval
         self.memory = memory  # long-term memory across trips (None: off)
+        # Evaluation only: switch a component off to measure what it contributes
+        # ("critic": accept the LLM's first draft; "food": skip the diet filter).
+        self.ablate = frozenset(ablate)
         self.small, self.big = small_model, big_model
         self.tools = tools or LocalTools()  # LocalTools (direct) or MCPTools (via MCP)
         self.graph = self._build(checkpointer or MemorySaver())
@@ -220,23 +254,35 @@ class TripPlanner:
 
     def _loc(self, state: TripState, text: str) -> str:
         """Translate user-facing text into the traveller's language (Hindi / Hinglish).
-        English, or any failure, returns the text unchanged."""
+        English, or any failure, returns the text unchanged. Long texts are split at markdown
+        headings and the sections translated in parallel: latency is dominated by output
+        length, so N sections take about 1/N of the time (measured in the Phase 5 notes)."""
         lang = (state.get("request") or {}).get("language", "en")
         if lang not in ("hi", "hinglish") or not text:
             return text
         style = ("Hindi in Devanagari script" if lang == "hi"
                  else "Hinglish: Hindi written ONLY in Latin letters (never Devanagari)")
-        try:
-            out = self.llm.complete(self.small, [
-                {"role": "system", "content": (
-                    f"Translate the user's text into {style}. Keep markdown structure, URLs, "
-                    "numbers, currency amounts, place names, hotel and restaurant names "
-                    "exactly as written. Output only the translation.")},
-                {"role": "user", "content": text}], max_tokens=3000)
-        except Exception:
-            log.exception("translation failed; using English")
-            return text
-        return out or text
+        system = (f"Translate the user's text into {style}. Keep markdown structure, URLs, "
+                  "numbers, currency amounts, place names, hotel and restaurant names exactly "
+                  "as written. Output only the translation.")
+
+        def one(chunk: str) -> str:
+            try:
+                out = self.llm.complete(self.small, [{"role": "system", "content": system},
+                                                     {"role": "user", "content": chunk}],
+                                        max_tokens=1500 if len(chunk) < 2500 else 3000)
+            except Exception:
+                log.exception("translation failed; keeping English for this part")
+                return chunk
+            return out or chunk
+
+        sections = [split_lines(sec) for sec in split_sections(text)]
+        pieces = [p for sec in sections for p in sec]
+        if len(pieces) == 1:
+            return one(text)
+        with ThreadPoolExecutor(max_workers=min(12, len(pieces))) as pool:
+            done = iter(list(pool.map(in_context(one), pieces)))
+        return "\n\n".join("\n".join(next(done) for _ in sec) for sec in sections)
 
     # ---------------- intake ----------------
     def _extract(self, state: TripState) -> TripState:
@@ -393,7 +439,7 @@ class TripPlanner:
         tasks = [(d, spec) for d in state["destinations"] for spec in specs]
         try:
             with ThreadPoolExecutor(max_workers=6) as pool:
-                found = list(pool.map(search, tasks))
+                found = list(pool.map(in_context(search), tasks))
         except RetrievalError as exc:
             raise PlanningUnavailable(UNAVAILABLE_MSG) from exc
         candidates, entities = {}, {}
@@ -432,6 +478,9 @@ class TripPlanner:
         def food():
             out, notes = {}, []
             for dest, pools in state["candidates"].items():
+                if "food" in self.ablate:  # ablation: no diet filter
+                    out[dest] = pools["meals"]
+                    continue
                 kept, note = FoodAgent.filter(req, pools["meals"], diet)
                 out[dest] = kept
                 notes += [f"{DESTINATIONS[dest]['name']}: {note}"] if note else []
@@ -441,8 +490,9 @@ class TripPlanner:
             return TransportAgent(self.tools).brief(req, state["destinations"])
 
         with ThreadPoolExecutor(max_workers=3) as pool:
-            f_stays, f_food, f_transport = (pool.submit(stays), pool.submit(food),
-                                            pool.submit(transport))
+            f_stays, f_food, f_transport = (pool.submit(in_context(stays)),
+                                            pool.submit(in_context(food)),
+                                            pool.submit(in_context(transport)))
             (ranked, n1), (kept, n2), brief = f_stays.result(), f_food.result(), f_transport.result()
         candidates = {d: {**p, "stays": ranked[d], "meals": kept[d]}
                       for d, p in state["candidates"].items()}
@@ -501,6 +551,8 @@ class TripPlanner:
         errors, warnings = validate_plan(
             state["plan"], state["entities"], req, self._season, centres,
             self._transfer)
+        if "critic" in self.ablate:  # ablation: the draft goes through unchecked
+            return {"errors": [], "warnings": warnings, "feedback": ""}
         update: TripState = {"errors": errors, "warnings": warnings,
                              "feedback": "; ".join(errors)}
         if errors and state["plan_attempts"] >= MAX_PLAN_ATTEMPTS:
@@ -894,6 +946,12 @@ class TripPlanner:
         return self._run(Command(resume=value), thread_id, on_event)
 
     def _run(self, inp: Any, thread_id: str, on_event: OnEvent) -> dict[str, Any]:
+        with metered(Meter()) as meter:  # tokens and cost of this run, across every agent
+            result = self._run_inner(inp, thread_id, on_event)
+        result["usage"] = meter.summary()
+        return result
+
+    def _run_inner(self, inp: Any, thread_id: str, on_event: OnEvent) -> dict[str, Any]:
         cfg = self._cfg(thread_id)
         if on_event is None:
             return self._result(self.graph.invoke(inp, cfg), thread_id)

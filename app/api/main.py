@@ -8,13 +8,14 @@ import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date
+from typing import Literal
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.api import security
 from app.api.ratelimit import RateLimiter, RateLimitExceeded, connect_redis
@@ -30,9 +31,14 @@ KEEPALIVE_SECONDS = 15  # comment lines keep proxies from closing a quiet event 
 
 
 # --- schemas ---
+# Size limits on everything a client sends: they bound LLM cost and stop oversized payloads
+# (an abuse vector) before any work is done. Oversized requests get a 422.
+MAX_MESSAGE = 1500
+
+
 class UserRegister(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=6, max_length=128)
 
 
 class Token(BaseModel):
@@ -41,34 +47,47 @@ class Token(BaseModel):
     guest: bool = False
 
 
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+
+
 class ChatRequest(BaseModel):
-    query: str
-    history: list[dict] = []
+    query: str = Field(min_length=1, max_length=1000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=20)
 
 
 class TripStart(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=MAX_MESSAGE)
 
 
 class TripResume(BaseModel):
-    value: str | dict  # ask: text; choose: option id; approve: {"action": ..., "text"?: ...}
+    # ask: text; choose: option id; approve: {"action": ..., "text"?: ...}; hotels: {"choices"}
+    value: str | dict
+
+    @field_validator("value")
+    @classmethod
+    def bounded(cls, v):
+        if len(v if isinstance(v, str) else json.dumps(v)) > MAX_MESSAGE * 2:
+            raise ValueError("value is too long")
+        return v
 
 
 class TripReplan(BaseModel):
-    from_day: int
-    reason: str
+    from_day: int = Field(ge=1, le=14)
+    reason: str = Field(max_length=500)
 
 
 class ChecklistUpdate(BaseModel):
-    item_id: str
+    item_id: str = Field(max_length=64)
     done: bool
 
 
 class FeedbackRequest(BaseModel):
-    session_id: str
-    query: str
-    rating: int
-    comment: str | None = None
+    session_id: str = Field(max_length=64)
+    query: str = Field(max_length=1000)
+    rating: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=1000)
 
 
 # --- lifespan ---
@@ -176,6 +195,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health():
         return {"status": "ok"}
 
+    @app.get("/api/stats")
+    async def stats(request: Request):
+        """Public, aggregate only: cost and agent time per completed trip."""
+        from app.usage import USD_TO_INR
+
+        s = request.app.state.trips.usage_stats()
+        if s.get("trips"):
+            s["cost_inr"] = {k: round(v * USD_TO_INR, 2) for k, v in s["cost_usd"].items()}
+        return s
+
     @app.post("/api/register")
     async def register(body: UserRegister, request: Request):
         store = request.app.state.store
@@ -238,13 +267,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         log.info("chat user=%s session=%s", user["email"], session_id)
         rag = request.app.state.rag
         return StreamingResponse(
-            rag.get_answer(body.query, session_id, body.history),
+            rag.get_answer(body.query, session_id, [t.model_dump() for t in body.history]),
             media_type="text/event-stream",
             headers={"X-Session-ID": session_id},
         )
 
     def _trip_response(request: Request, trip_id: str, result: dict, owner: str) -> dict:
         out = {"trip_id": trip_id, "status": result["status"]}
+        if result.get("usage"):  # what this step cost; saved per trip for the stats
+            step = (result.get("prompt") or {}).get("type") or result["status"]
+            request.app.state.trips.record_usage(trip_id, step, result["usage"])
+            out["usage"] = request.app.state.trips.trip_usage(trip_id)
         if result["status"] == "waiting":
             out["prompt"] = result["prompt"]
             return out

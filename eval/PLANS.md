@@ -1,4 +1,4 @@
-# Plan quality (2026-11-10)
+# Plan quality (2026-11-11)
 
 30 trip requests (`eval/scenarios.yaml`), run through the real planner (LLM planner, rule-based Critic and agents). Every check is computed in code from the saved plan; no LLM judge. Rates with 95% Wilson intervals, over the scenarios each check applies to.
 
@@ -16,7 +16,16 @@
 | LLM draft valid first try | 90% (74-97%) | 30 |
 | no rule-based fallback needed | 100% (89-100%) | 30 |
 
-Median time to a plan ready for review: 8 s (max 22 s); LLM calls per plan: 2.6.
+**Cost and time per trip** (request to a plan ready for review, before the optional hotel research):
+
+| | median | 90th percentile |
+|---|---|---|
+| agent time | 17 s | 30 s |
+| LLM cost | ₹0.01 ($0.0002) | ₹0.04 |
+| tokens | 1,394 | 3,493 |
+| LLM calls | 2 | 12 |
+
+Cost uses the per-model prices in `app/usage.py` (estimates; USD to INR at 88).
 
 Failures:
 

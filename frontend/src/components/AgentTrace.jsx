@@ -19,7 +19,7 @@ function Elapsed({ since }) {
   return <span className="trace-clock">{((now - since) / 1000).toFixed(1)} s</span>;
 }
 
-export default function AgentTrace({ steps, live = false, since, title = "Agents at work" }) {
+export default function AgentTrace({ steps, live = false, since, title = "Agents at work", usage }) {
   if (!steps.length && !live) return null;
   const total = steps.reduce((n, s) => n + (s.ms || 0), 0);
   return (
@@ -53,6 +53,12 @@ export default function AgentTrace({ steps, live = false, since, title = "Agents
             <div className="trace-body"><span className="trace-msg muted">{steps.length ? "Handing over to the next agent…" : "Connecting to the planner…"}</span></div></li>
         )}
       </ol>
+      {usage?.llm_calls > 0 && (
+        <p className="trace-usage">
+          {usage.llm_calls} LLM calls · {(usage.tokens_in + usage.tokens_out).toLocaleString()} tokens ·
+          about ₹{(usage.cost_usd * 88).toFixed(2)} (${usage.cost_usd.toFixed(4)}) · {usage.seconds.toFixed(1)} s of agent time
+        </p>
+      )}
     </section>
   );
 }
