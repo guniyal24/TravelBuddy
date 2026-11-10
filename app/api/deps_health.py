@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from datetime import date
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,8 @@ CACHE_SECONDS = 60.0
 
 def describe_error(exc: BaseException) -> str:
     """'UnauthorizedException (HTTP 401)': enough to tell a bad key from an outage."""
-    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    status = (getattr(exc, "status_code", None) or getattr(exc, "status", None)
+              or getattr(getattr(exc, "response", None), "status_code", None))
     return type(exc).__name__ + (f" (HTTP {status})" if isinstance(status, int) else "")
 
 
@@ -55,6 +57,14 @@ def build_checks(planner, trips) -> dict[str, Callable[[], dict | None]]:
                                              encoding_format="float").data[0].embedding
             return {"dim": len(vec)}
         checks["embeddings"] = embeddings
+    if planner is not None:  # live weather (Open-Meteo, no key); uncached so it is a real check
+        def weather():
+            from mcp_server.weather import FORECAST, fetch_uncached
+            today = date.today().isoformat()
+            fetch_uncached(FORECAST, {"latitude": 30.32, "longitude": 78.03,
+                                      "daily": "temperature_2m_max", "start_date": today,
+                                      "end_date": today}, attempts=1)
+        checks["weather"] = weather
     llm, model = getattr(planner, "llm", None), getattr(planner, "small", None)
     if llm is not None and model:
         checks["llm"] = lambda: llm.complete(

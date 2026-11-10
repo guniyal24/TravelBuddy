@@ -44,6 +44,7 @@ from app.memory import TravelMemory, extract_preferences, trip_episode
 from app.rag.retriever import RetrievalError
 from app.towns import CIRCUITS, DESTINATIONS, NOT_READY, PLACE_ALIASES  # noqa: F401
 from app.usage import Meter, in_context, metered
+from ingest.schema import is_generic_name
 from mcp_server.client import LocalTools, ToolError
 
 log = logging.getLogger(__name__)
@@ -135,12 +136,32 @@ EXTRACT_SYSTEM = (
     'null), "tier" ("budget"|"mid"|"premium" or null), "budget_inr" (number or null), '
     '"interests" (list of short words), "vulnerable_travellers" (true if children, elderly or '
     'health conditions are mentioned, else false), "diet" ("veg"|"non-veg" or null), '
-    '"pace" ("relaxed"|"balanced"|"packed" or null), "language" ("en" for English, "hi" for '
-    'Hindi in Devanagari, "hinglish" for Hindi written in Latin letters), "start_date" (the '
+    '"pace" ("relaxed"|"balanced"|"packed" or null), "start_date" (the '
     'first day of travel as YYYY-MM-DD, worked out from TODAY for phrases like "next Friday" or '
-    '"from 12 March"; null if no specific day is given). Use null when not stated; never guess '
-    '(language is always one of the three).'
+    '"from 12 March"; null if no specific day is given). Use null when not stated; never guess.'
 )
+
+# Language is decided in code, not by the LLM, which labelled plain English as Hinglish.
+DEVANAGARI = re.compile(r"[ऀ-ॿ]")
+HINGLISH_WORDS = frozenset((
+    "hai hain mein mujhe mujhko humein hume hamein hum chahiye chahte chahti karna karni karo "
+    "jana jaana jaana hai ghumna ghoomna ghumne ghoomne aur ke ka ki ko se liye wala wali "
+    "din dino dinon log logo logon kya kaise kitna kitne bhi sasta sasti accha achha acha "
+    "yatra parivar saath tak nahi nahin thoda bahut zyada pasand dekhna rehna rukna"
+).split())
+
+
+def detect_language(text: str) -> str | None:
+    """'hi' for Devanagari, 'hinglish' for Hindi in Latin letters, 'en' for English, or None
+    when the text is too short to tell (a follow-up like "2" keeps the trip's language)."""
+    text = text or ""
+    if DEVANAGARI.search(text):
+        return "hi"
+    words = re.findall(r"[a-z]+", text.lower())
+    if len({w for w in words if w in HINGLISH_WORDS}) >= 2:
+        return "hinglish"
+    return "en" if len(words) >= 4 else None
+LANGUAGES = ("en", "hi", "hinglish")
 HEAVY_RAIN_MM = 30.0  # forecast rain in a day that makes hill roads risky
 
 
@@ -297,7 +318,7 @@ class TripPlanner:
                                         f"MESSAGE: {state['user_text']}"}], default={})
         merged = dict(existing)
         for key, val in res.items():
-            if val not in (None, "", []):
+            if key != "language" and val not in (None, "", []):
                 merged[key] = val
         for key in ("days", "people", "month"):
             try:
@@ -331,8 +352,13 @@ class TripPlanner:
                 merged["origin"] = saved if saved and saved != merged.get("origin") else None
         merged["tier"] = merged.get("tier") if merged.get("tier") in (
             "budget", "mid", "premium") else "budget"
-        merged["language"] = merged.get("language") if merged.get("language") in (
-            "en", "hi", "hinglish") else "en"
+        # The language the traveller writes in wins. A reply too short to tell ("2") keeps the
+        # trip's language, then the saved preference, then English.
+        previous = (state.get("request") or {}).get("language")
+        saved = profile.get("language")
+        merged["language"] = (detect_language(state["user_text"])
+                              or (previous if previous in LANGUAGES else None)
+                              or (saved if saved in LANGUAGES else None) or "en")
         merged["diet"] = merged.get("diet") if merged.get("diet") in ("veg", "non-veg") else ""
         merged["pace"] = merged.get("pace") if merged.get("pace") in (
             "relaxed", "balanced", "packed") else ""
@@ -445,7 +471,8 @@ class TripPlanner:
         candidates, entities = {}, {}
         for dest in state["destinations"]:
             pools = {key: ids for d, key, ids in found if d == dest}
-            ents = self.store.fetch_entities(sum(pools.values(), []))
+            ents = {i: e for i, e in self.store.fetch_entities(sum(pools.values(), [])).items()
+                    if not is_generic_name(e.get("name", ""))}  # "Temples Nearby" is no place
             entities.update(ents)
             tier = req["tier"]
             stays = [ents[i] for i in pools["stays"] if i in ents]
@@ -541,7 +568,7 @@ class TripPlanner:
             user += f"\n\nFix these problems from the last attempt: {state['feedback']}"
         plan = self.llm.json(self.big, [{"role": "system", "content": PLAN_SYSTEM},
                                         {"role": "user", "content": user}], default={})
-        plan = _apply_lock(_expand_aliases(plan, alias_to_id), locked)
+        plan = _one_stay_per_town(_apply_lock(_expand_aliases(plan, alias_to_id), locked))
         return {"plan": plan, "plan_attempts": state.get("plan_attempts", 0) + 1}
 
     # ---------------- critic ----------------
@@ -591,7 +618,7 @@ class TripPlanner:
                 blocks[-1][2] = d["day"]
             else:
                 blocks.append([d["destination"], d["day"], d["day"]])
-        days, kinds = [], set()
+        days, kinds, failed = [], set(), 0
         for dest, a, b in blocks:
             town = DESTINATIONS[dest]
             try:
@@ -600,6 +627,7 @@ class TripPlanner:
                                     end_date=(start + timedelta(days=b - 1)).isoformat())
             except ToolError as exc:
                 log.warning("get_weather failed for %s: %s", dest, exc)
+                failed += 1
                 continue
             kinds.add(w.get("kind"))
             for i, x in enumerate(w.get("days") or []):
@@ -609,14 +637,17 @@ class TripPlanner:
             rain = x.get("rain_mm") or 0
             if x["kind"] == "forecast" and rain >= HEAVY_RAIN_MM:
                 when = start + timedelta(days=x["day"] - 1)
-                warnings.append(f"Weather, day {x['day']} ({when:%a %d %b}, {x['town']}): heavy "
+                warnings.append(f"Weather, day {x['day']} ({when:%A %d %b}, {x['town']}): heavy "
                                 f"rain forecast ({rain:.0f} mm). Hill roads can close; consider "
                                 f"re-planning from day {x['day']}.")
         note = ""
         if "typical" in kinds:
             note = ("Your dates are beyond the 16-day forecast, so the weather shown is last "
                     "year's for the same dates: a rough guide, not a forecast.")
-        return {"weather": {"days": days, "note": note,
+        if failed:  # say so: silence here would read as "no weather worries"
+            warnings.append("Live weather was unavailable for part of this trip; check a "
+                            "forecast for the hills before you travel.")
+        return {"weather": {"days": days, "note": note, "unavailable": failed,
                             "kind": "forecast" if kinds == {"forecast"} else "typical"},
                 "warnings": list(dict.fromkeys(warnings))}
 
@@ -1009,3 +1040,18 @@ def _apply_lock(plan: dict, locked: list[dict]) -> dict:
     last = max(d["day"] for d in locked)
     rest = [d for d in plan["days"] if isinstance(d, dict) and d.get("day", 0) > last]
     return {**plan, "days": [*locked, *rest]}
+
+
+def _one_stay_per_town(plan: dict) -> dict:
+    """Consecutive nights in the same town keep the first night's stay: the LLM sometimes picks
+    a new hotel each night, which no traveller wants."""
+    if not isinstance(plan, dict) or not isinstance(plan.get("days"), list):
+        return plan
+    days, prev = [], None
+    for d in plan["days"]:
+        if (isinstance(d, dict) and isinstance(prev, dict) and d.get("stay") and prev.get("stay")
+                and d.get("destination") == prev.get("destination")):
+            d = {**d, "stay": prev["stay"]}
+        days.append(d)
+        prev = d
+    return {**plan, "days": days}

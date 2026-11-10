@@ -258,3 +258,23 @@ def test_food_ablation_skips_the_diet_filter():
                  {"id": "m2", "name": "Sattvik", "description": "pure veg thali"}]}}}
     assert [m["id"] for m in on._specialists(state)["candidates"][HW]["meals"]] == ["m2"]
     assert [m["id"] for m in off._specialists(state)["candidates"][HW]["meals"]] == ["m1", "m2"]
+
+
+def test_consecutive_nights_in_one_town_keep_one_hotel():
+    from app.graph.trip_graph import _one_stay_per_town
+    plan = {"days": [
+        {"day": 1, "destination": "destination_almora", "stay": "s1"},
+        {"day": 2, "destination": "destination_almora", "stay": "s2"},   # LLM switched hotel
+        {"day": 3, "destination": "destination_kausani", "stay": "s3"},  # new town: keep
+        {"day": 4, "destination": "destination_kausani", "stay": None}]}  # last day: no stay
+    assert [d["stay"] for d in _one_stay_per_town(plan)["days"]] == ["s1", "s1", "s3", None]
+    assert _one_stay_per_town({"days": "bad"}) == {"days": "bad"}
+
+
+def test_heading_like_listings_are_not_places():
+    from ingest.schema import is_generic_name
+    for junk in ["Temples Nearby", "Local Temples", "Other cafes", "Things to do"]:
+        assert is_generic_name(junk), junk
+    for real in ["Pingla Devi Mandir", "Hotel Golden", "Cafe Coffee Day", "Mall Road",
+                 "Lake Mist", "Dhaba shop"]:
+        assert not is_generic_name(real), real

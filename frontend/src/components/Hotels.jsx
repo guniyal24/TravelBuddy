@@ -68,7 +68,8 @@ function HotelCard({ o, rank, selected, current, onPick, readOnly }) {
 function TravelNotes({ travel }) {
   if (!travel) return null;
   if (!travel.available) {
-    return <p className="muted small"><Icon name="alert" size={14} /> Live travel notes are off ({travel.reason || "web search not configured"}). Check road and weather advisories before you go.</p>;
+    // The reason ("Web search is not configured.") is for operators, not travellers.
+    return <p className="muted small"><Icon name="alert" size={14} /> Live travel notes aren't available right now. Check road and weather advisories before you go.</p>;
   }
   if (!travel.notes?.length) return <p className="muted small">No current travel notes found for your towns.</p>;
   return (

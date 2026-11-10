@@ -38,7 +38,7 @@ def render_itinerary(plan: dict, entities: dict[str, dict], cost: dict, warnings
     for d in plan["days"]:
         dest = d["destination"].removeprefix("destination_").replace("_", " ").title()
         when = day_date(request, d["day"])
-        out.append(f"## Day {d['day']} - {dest}" + (f" · {when:%a %d %b}" if when else ""))
+        out.append(f"## Day {d['day']} - {dest}" + (f" · {when:%A %d %b}" if when else ""))
         if line := weather_line(by_day.get(d["day"])):
             out.append(f"_{line}_")
         for i in d.get("stops") or []:

@@ -7,7 +7,7 @@ from app.export.ics import build_ics
 from app.export.share import build_pdf, build_share_text
 from app.graph.agents import FoodAgent, SafetyAgent, StayAgent
 from app.graph.schedule import build_timeline
-from app.graph.trip_graph import TripPlanner
+from app.graph.trip_graph import TripPlanner, detect_language
 from app.trips.store import TripStore, clean_profile
 from mcp_server.client import LocalTools
 
@@ -179,12 +179,32 @@ def test_hindi_request_gets_translated_prompts_and_itinerary_but_keeps_links_and
     assert st["itinerary"].startswith("अनुवाद:") and st["itinerary_en"].startswith("# Your Uttarakhand")
 
 
+def test_language_comes_from_the_text_not_the_llm():
+    # the LLM once labelled plain English as Hinglish; code decides now
+    tp, llm = make([{**REQ, "language": "hinglish"}, GOOD])
+    r = tp.start("l1", "Kausani and Almora, 3 days from next Friday, vegetarian")
+    assert r["prompt"]["message"] == "Which circuit would you like?"
+    assert not [p for p in llm.prompts if p.startswith("TRANSLATE:")]
+
+
+@pytest.mark.parametrize("text,lang", [
+    ("Kausani and Almora, 3 days from next Friday for 2 people", "en"),
+    ("mujhe 3 din ke liye Rishikesh jana hai", "hinglish"),
+    ("Nainital ka trip chahiye family ke saath", "hinglish"),
+    ("मुझे हरिद्वार जाना है", "hi"),
+    ("2", None), ("veg", None),  # too short to tell: keeps the trip's language
+    ("Dehradun se Mussoorie, 2 days, budget hotel", "en"),
+])
+def test_detect_language(text, lang):
+    assert detect_language(text) == lang
+
+
 def test_translation_failure_falls_back_to_english():
     class Broken(LangLLM):
         def complete(self, *a, **k):
             raise RuntimeError("down")
     tp, _ = make([{**REQ, "language": "hinglish"}, GOOD], cls=Broken)
-    r = tp.start("h2", "x")
+    r = tp.start("h2", "mujhe 3 din ke liye Haridwar jana hai")
     assert r["prompt"]["message"] == "Which circuit would you like?"
 
 
@@ -221,7 +241,7 @@ def test_replan_rejects_unapproved_trips_and_bad_days():
 
 def test_translation_work_is_not_repeated_when_the_graph_resumes():
     tp, llm = make([{**REQ, "language": "hi"}, GOOD])
-    tp.start("n1", "x")
+    tp.start("n1", "मुझे हरिद्वार जाना है")
     tp.resume("n1", BOTH)
     tp.resume("n1", {"action": "approve"})
     # choose message, review text, approve message, booking links: each piece exactly once
