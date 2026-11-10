@@ -14,15 +14,11 @@ plan after the Critic accepts it.
 import re
 
 from app.cost.pricing import parse_price_range
+from app.towns import ELEVATION_M
 from mcp_server.client import ToolError
 
 # Approximate town elevations (m), used only when a stay has no measured elevation.
-APPROX_ELEVATION_M = {
-    "destination_haridwar": 250, "destination_rishikesh": 340, "destination_dehradun": 640,
-    "destination_jim_corbett": 400, "destination_mussoorie": 2000, "destination_nainital": 2000,
-    "destination_almora": 1650, "destination_ranikhet": 1830, "destination_auli": 2800,
-    "destination_badrinath": 3300, "destination_kedarnath": 3580,
-}
+APPROX_ELEVATION_M = ELEVATION_M  # from the town registry
 HIGH_TOWN_M = 2500
 # Whole-word matches only, so "Barista" or "Fishtail Cafe" style names do not trip "bar"/"fish".
 # Bars and pubs count too: a vegetarian traveller asking for veg food rarely wants one.

@@ -505,3 +505,9 @@ main > div[hidden] { display: none; }
 .mem-list li { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface-2); overflow-wrap: anywhere; }
 .mem-list q { display: block; color: var(--muted); font-style: italic; font-size: 13.5px; margin-top: 2px; }
 .option .pill:not(.ok):not(.warn) { background: var(--soft); color: var(--brand); }
+
+/* weather on timeline days */
+.tl-day header { flex-wrap: wrap; }
+.wx { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--soft); color: var(--brand); white-space: nowrap; }
+.wx.wet { background: var(--warn-bg); color: var(--warn); }
+.wx em { font-weight: 600; opacity: .8; }

@@ -20,7 +20,7 @@ AGENTS = {
     "edit": "Planner", "cancel": "Planner", "finalize": "Booking",
     "concierge": "Concierge", "hotel_research": "Hotel agent", "travel_info": "Travel info",
     "rank_hotels": "Ranker", "choose_hotels": "You", "apply_hotels": "Booking",
-    "remember": "Memory",
+    "remember": "Memory", "weather": "Weather",
 }
 # Nodes that pause for the traveller: their "start" is not shown (it repeats on resume).
 HUMAN_NODES = {"ask_missing", "choose", "approve", "choose_hotels"}
@@ -39,6 +39,7 @@ START_MESSAGES = {
     "rank_hotels": "Ranking hotels by rating, review count, tier and budget",
     "apply_hotels": "Updating your plan and cost with the hotels you picked",
     "remember": "Saving what I learned about you for next time",
+    "weather": "Checking the weather for each day of your trip",
 }
 MAX_DETAILS = 4
 
@@ -83,6 +84,8 @@ def _end(node: str, state: dict, out: dict) -> tuple[str, list[str], str] | None
             details.append("Interests: " + ", ".join(req["interests"]))
         if req.get("origin"):
             details.append(f"Travelling from {req['origin']}")
+        if req.get("start_date"):
+            details.append(f"Starting {req['start_date']}")
         if req.get("language") in ("hi", "hinglish"):
             details.append("Replies will be in " + ("Hindi" if req["language"] == "hi"
                                                      else "Hinglish"))
@@ -200,6 +203,20 @@ def _end(node: str, state: dict, out: dict) -> tuple[str, list[str], str] | None
         total = (out.get("cost") or {}).get("total_inr")
         return ("Plan updated with your hotels" + (f": now {_inr(total[0])} to {_inr(total[1])}"
                                                    if total else ""), [], "ok")
+    if node == "weather":
+        w = out.get("weather") or {}
+        days = w.get("days") or []
+        if not days:
+            return "No travel dates given, so no forecast (add dates for live weather)", [], "info"
+        heavy = [x for x in days if x.get("kind") == "forecast"
+                 and (x.get("rain_mm") or 0) >= 30]
+        what = "Forecast" if w.get("kind") == "forecast" else "Typical weather (not a forecast)"
+        detail = [f"Day {x['day']} {x['town']}: {round(x['min_c'])}-{round(x['max_c'])} °C, "
+                  f"rain {x.get('rain_mm') or 0:.0f} mm" for x in days if x.get("max_c") is not None]
+        if heavy:
+            return (f"{what} for {_n(len(days), 'day')}: heavy rain on "
+                    f"{_n(len(heavy), 'day')}, re-planning suggested", detail, "warn")
+        return f"{what} for {_n(len(days), 'day')}: no heavy rain", detail, "ok"
     if node == "remember":
         learned = out.get("learned") or []
         return ((f"Learned {_n(len(learned), 'lasting preference')} and saved this trip"

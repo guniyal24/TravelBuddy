@@ -1,4 +1,22 @@
 """Render an approved plan as markdown, citing source ids."""
+from datetime import date, timedelta
+
+
+def day_date(request: dict, day: int) -> date | None:
+    """The calendar date of a plan day, when the traveller gave a start date."""
+    try:
+        return date.fromisoformat(request["start_date"]) + timedelta(days=day - 1)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def weather_line(w: dict | None) -> str:
+    if not w or w.get("max_c") is None:
+        return ""
+    label = "forecast" if w.get("kind") == "forecast" else "typical for these dates, not a forecast"
+    rain = w.get("rain_mm") or 0
+    return (f"Weather: {round(w['min_c'])}-{round(w['max_c'])} °C, rain {rain:.0f} mm "
+            f"({label})")
 
 
 def _line(ent: dict | None, fallback: str, show_ids: bool = False) -> str:
@@ -14,11 +32,15 @@ def _line(ent: dict | None, fallback: str, show_ids: bool = False) -> str:
 
 
 def render_itinerary(plan: dict, entities: dict[str, dict], cost: dict, warnings: list[str],
-                     request: dict, show_ids: bool = False) -> str:
+                     request: dict, show_ids: bool = False, weather: dict | None = None) -> str:
+    by_day = {w["day"]: w for w in (weather or {}).get("days", [])}
     out = [f"# Your Uttarakhand trip: {request['days']} days, {request['people']} traveller(s)", ""]
     for d in plan["days"]:
         dest = d["destination"].removeprefix("destination_").replace("_", " ").title()
-        out.append(f"## Day {d['day']} - {dest}")
+        when = day_date(request, d["day"])
+        out.append(f"## Day {d['day']} - {dest}" + (f" · {when:%a %d %b}" if when else ""))
+        if line := weather_line(by_day.get(d["day"])):
+            out.append(f"_{line}_")
         for i in d.get("stops") or []:
             out.append(f"- Visit: {_line(entities.get(i), i, show_ids)}")
         for i in d.get("meals") or []:

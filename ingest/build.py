@@ -21,7 +21,8 @@ from ingest.elevation import fetch_elevations
 from ingest.geo import haversine_km
 from ingest.geocode import fill_missing_coordinates
 from ingest.google_places import fill_from_google
-from ingest.osm import fill_from_osm
+from ingest.osm import fill_from_osm, normalize
+from ingest.osm_places import places_from_osm
 from ingest.schema import (
     Confidence,
     Connection,
@@ -129,22 +130,39 @@ def load_yaml(path: Path) -> dict:
 
 
 def build_destination(cfg: dict, today: date) -> tuple[Entity, list[Entity], dict]:
-    wt = wikivoyage.fetch_wikitext(cfg["wikivoyage_page"])
-    understand = wikivoyage.extract_section(wt, "Understand")
-    description = understand[:900]
+    """Wikivoyage first (descriptions, prices, hours); towns with `osm_places: true` also get
+    OpenStreetMap places. A town without a Wikivoyage page relies on OSM and its seed text."""
+    page = cfg.get("wikivoyage_page")
+    wt = ""
+    if page:
+        try:
+            wt = wikivoyage.fetch_wikitext(page)
+        except (KeyError, ValueError) as exc:
+            log.warning("No Wikivoyage page %r for %s (%s)", page, cfg["name"], exc)
+    description = (wikivoyage.extract_section(wt, "Understand")[:900] if wt else "") or \
+        cfg.get("description", "")
+    if wt:
+        source = Source(name="Wikivoyage", url=wikivoyage.page_url(page),
+                        license=wikivoyage.LICENSE, fetched_at=today)
+    else:
+        source = Source(name="OpenStreetMap", url=f"https://www.openstreetmap.org/#map=13/"
+                        f"{cfg['lat']}/{cfg['lon']}", license="ODbL 1.0", fetched_at=today)
     dest = Entity(
         id=cfg["id"], type=EntityType.DESTINATION, name=cfg["name"], description=description,
         semantic_text=f"{cfg['name']}, Uttarakhand. {description}"[:700],
         lat=cfg.get("lat"), lon=cfg.get("lon"), region=cfg.get("region", ""),
-        source=Source(name="Wikivoyage", url=wikivoyage.page_url(cfg["wikivoyage_page"]),
-                      license=wikivoyage.LICENSE, fetched_at=today),
-        confidence=Confidence.SOURCED,
+        source=source, confidence=Confidence.SOURCED,
     )
     places = wikivoyage.parse_listings(
-        wt, cfg["id"], cfg["name"], cfg["wikivoyage_page"], cfg.get("region", ""), today)
+        wt, cfg["id"], cfg["name"], page, cfg.get("region", ""), today) if wt else []
+    if cfg.get("osm_places"):
+        known = {normalize(p.name) for p in places}
+        extra = places_from_osm(cfg, today, known, radius_m=cfg.get("radius_m", 9000))
+        log.info("  OSM added %d places", len(extra))
+        places += extra
     notes = {"destination": cfg["id"], "source": dest.source.url,
-             "get_in": wikivoyage.extract_section(wt, "Get in"),
-             "get_around": wikivoyage.extract_section(wt, "Get around")}
+             "get_in": wikivoyage.extract_section(wt, "Get in") if wt else "",
+             "get_around": wikivoyage.extract_section(wt, "Get around") if wt else ""}
     return dest, places, notes
 
 
@@ -193,6 +211,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", nargs="*", help="destination ids to ingest")
     ap.add_argument("--skip-elevation", action="store_true")
+    ap.add_argument("--merge", action="store_true",
+                    help="with --only: replace just those towns in the existing entities.json")
     ap.add_argument("--skip-geocode", action="store_true")
     ap.add_argument("--google", action="store_true",
                     help="also use Google Places (needs GOOGLE_PLACES_API_KEY; billable)")
@@ -234,6 +254,17 @@ def main() -> None:
     everything += curated_entities(destinations, today)
 
     OUT.mkdir(parents=True, exist_ok=True)
+    if args.merge and (OUT / "entities.json").exists():
+        rebuilt = {c["id"] for c in cfgs}
+        old = json.loads((OUT / "entities.json").read_text())
+        fresh = {e.id for e in everything}
+        kept = [e for e in old if e["id"] not in fresh and e["id"] not in rebuilt
+                and e.get("destination_id") not in rebuilt]
+        log.info("Merge: keeping %d existing entities, adding %d", len(kept), len(everything))
+        merged = kept + [e.model_dump(mode="json") for e in everything]
+        (OUT / "entities.json").write_text(json.dumps(merged, indent=2, ensure_ascii=False))
+        log.info("Wrote %d entities to %s", len(merged), OUT)
+        return
     (OUT / "entities.json").write_text(
         json.dumps([e.model_dump(mode="json") for e in everything], indent=2, ensure_ascii=False))
     (OUT / "getting_in_notes.json").write_text(json.dumps(notes, indent=2, ensure_ascii=False))

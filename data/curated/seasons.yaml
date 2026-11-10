@@ -57,3 +57,84 @@ destinations:
     last_verified: null
     caution_months: {7: "monsoon rain and landslides", 8: "monsoon rain and landslides", 1: "cold; occasional snow"}
     best_months: [3, 4, 5, 6, 9, 10, 11]
+  # ---- added with the town registry (Phase 4); all curated_unverified ----
+  destination_dhanaulti:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain, fog and landslides on the Mussoorie road", 8: "monsoon rain, fog and landslides on the Mussoorie road", 1: "snow can block the road; carry chains or check before going"}
+    best_months: [3, 4, 5, 6, 10, 11, 12]
+  destination_kanatal:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain and landslides", 8: "monsoon rain and landslides", 1: "snow and very cold nights for camping"}
+    best_months: [3, 4, 5, 6, 10, 11]
+  destination_chakrata:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain and landslides", 8: "monsoon rain and landslides", 1: "snow can close roads"}
+    best_months: [3, 4, 5, 6, 10, 11]
+  destination_lansdowne:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain and landslides", 8: "monsoon rain and landslides"}
+    best_months: [3, 4, 5, 6, 9, 10, 11, 12]
+  destination_joshimath:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon; landslides on the Rishikesh-Badrinath highway", 8: "monsoon; landslides on the Rishikesh-Badrinath highway", 1: "snow and cold; check the ropeway status"}
+    best_months: [4, 5, 6, 9, 10, 11]
+  destination_ghangaria:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {1: "closed: the Valley of Flowers and Hemkund Sahib open only from about June to October", 2: "closed for winter", 3: "closed for winter", 4: "closed for winter", 5: "usually still closed; the valley opens around June 1", 11: "closed for winter", 12: "closed for winter", 7: "best flowers but heavy monsoon rain and landslides on the approach road"}
+    best_months: [7, 8, 9]
+  destination_chopta:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain and landslides", 8: "monsoon rain and landslides", 1: "heavy snow; the road past Chopta may close", 2: "heavy snow; the road past Chopta may close"}
+    best_months: [3, 4, 5, 6, 9, 10, 11, 12]
+  destination_uttarkashi:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon; landslides on the Gangotri highway", 8: "monsoon; landslides on the Gangotri highway"}
+    best_months: [3, 4, 5, 6, 9, 10, 11]
+  destination_gangotri:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {1: "temple closed for winter; road under snow", 2: "temple closed for winter; road under snow", 3: "temple closed for winter", 4: "temple usually opens late April or May", 7: "monsoon; landslides on the highway", 8: "monsoon; landslides on the highway", 11: "temple usually closes around Diwali", 12: "temple closed for winter; road under snow"}
+    best_months: [5, 6, 9, 10]
+  destination_bhimtal:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain", 8: "monsoon rain"}
+    best_months: [3, 4, 5, 6, 9, 10, 11, 12]
+  destination_mukteshwar:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain and fog", 8: "monsoon rain and fog", 1: "cold; occasional snow"}
+    best_months: [3, 4, 5, 6, 9, 10, 11]
+  destination_kausani:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon cloud often hides the peaks", 8: "monsoon cloud often hides the peaks"}
+    best_months: [3, 4, 5, 9, 10, 11, 12]
+  destination_jageshwar:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain", 8: "monsoon rain"}
+    best_months: [3, 4, 5, 6, 9, 10, 11]
+  destination_binsar:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain; leeches on forest trails", 8: "monsoon rain; leeches on forest trails", 1: "cold; occasional snow"}
+    best_months: [3, 4, 5, 9, 10, 11]
+  destination_munsiyari:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon; landslides on a long mountain road", 8: "monsoon; landslides on a long mountain road", 1: "heavy snow; roads may close", 2: "heavy snow; roads may close"}
+    best_months: [3, 4, 5, 6, 10, 11]
+  destination_pithoragarh:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon; landslides", 8: "monsoon; landslides"}
+    best_months: [3, 4, 5, 6, 9, 10, 11]

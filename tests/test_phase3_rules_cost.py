@@ -65,7 +65,7 @@ def test_season_known_unknown_and_validation():
     assert check_season("destination_rishikesh", 7, s).status == "caution"
     assert "rafting" in check_season("destination_rishikesh", 7, s).reasons[0]
     assert check_season("destination_haridwar", 11, s).status == "good"
-    unk = check_season("destination_pithoragarh", 6, s)
+    unk = check_season("destination_nowhere", 6, s)
     assert unk.status == "unknown"  # never guesses
     with pytest.raises(ValueError):
         check_season("destination_haridwar", 13, s)

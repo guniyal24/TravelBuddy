@@ -20,6 +20,7 @@ import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import date, timedelta
 from typing import Annotated, Any, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -41,6 +42,7 @@ from app.graph.schedule import build_timeline
 from app.graph.trace import Tracer
 from app.memory import TravelMemory, extract_preferences, trip_episode
 from app.rag.retriever import RetrievalError
+from app.towns import CIRCUITS, DESTINATIONS, NOT_READY, PLACE_ALIASES  # noqa: F401
 from mcp_server.client import LocalTools, ToolError
 
 log = logging.getLogger(__name__)
@@ -59,52 +61,8 @@ MAX_PLAN_ATTEMPTS = 3
 MAX_EDITS = 3
 REQUIRED = ("days", "people", "month")
 
-DESTINATIONS = {
-    "destination_haridwar": {"name": "Haridwar", "lat": 29.9457, "lon": 78.1642,
-                             "themes": ["temple", "pilgrim", "aarti", "ganga", "spiritual"]},
-    "destination_rishikesh": {"name": "Rishikesh", "lat": 30.0869, "lon": 78.2676,
-                              "themes": ["yoga", "rafting", "adventure", "cafe", "ashram",
-                                         "meditation", "music"]},
-    "destination_dehradun": {"name": "Dehradun", "lat": 30.3165, "lon": 78.0322,
-                             "themes": ["food", "cafe", "shopping", "museum", "family"]},
-    "destination_mussoorie": {"name": "Mussoorie", "lat": 30.4598, "lon": 78.0644,
-                              "themes": ["hill", "honeymoon", "waterfall", "mall road", "views",
-                                         "family", "snow"]},
-    "destination_nainital": {"name": "Nainital", "lat": 29.3919, "lon": 79.4542,
-                             "themes": ["lake", "boating", "hill", "honeymoon", "views", "family"]},
-    "destination_jim_corbett": {"name": "Jim Corbett", "lat": 29.5300, "lon": 78.7747,
-                                "themes": ["wildlife", "safari", "tiger", "nature", "jungle",
-                                           "birding", "family"]},
-    "destination_auli": {"name": "Auli", "lat": 30.5267, "lon": 79.5667,
-                         "themes": ["ski", "snow", "skiing", "trek", "adventure", "views",
-                                    "honeymoon"]},
-    "destination_kedarnath": {"name": "Kedarnath", "lat": 30.7352, "lon": 79.0669,
-                              "themes": ["pilgrim", "temple", "char dham", "chardham", "trek",
-                                         "spiritual"]},
-    "destination_badrinath": {"name": "Badrinath", "lat": 30.7433, "lon": 79.4938,
-                              "themes": ["pilgrim", "temple", "char dham", "chardham",
-                                         "spiritual"]},
-    "destination_almora": {"name": "Almora", "lat": 29.5971, "lon": 79.6591,
-                           "themes": ["culture", "heritage", "craft", "food", "views", "quiet"]},
-    "destination_ranikhet": {"name": "Ranikhet", "lat": 29.6434, "lon": 79.4322,
-                             "themes": ["quiet", "golf", "views", "hill", "nature", "family"]},
-}
-
-# How travellers write each town (English spellings, Hinglish, Devanagari). Matched in code, not
-# by the LLM, so a town the traveller names is never lost or mistaken for an interest.
-PLACE_ALIASES = {
-    "destination_haridwar": ["haridwar", "hardwar", "हरिद्वार"],
-    "destination_rishikesh": ["rishikesh", "hrishikesh", "ऋषिकेश"],
-    "destination_dehradun": ["dehradun", "dehra dun", "doon", "देहरादून"],
-    "destination_mussoorie": ["mussoorie", "mussorie", "masoori", "mussourie", "मसूरी"],
-    "destination_nainital": ["nainital", "naini tal", "नैनीताल"],
-    "destination_jim_corbett": ["jim corbett", "corbett", "जिम कॉर्बेट", "कॉर्बेट"],
-    "destination_auli": ["auli", "औली"],
-    "destination_kedarnath": ["kedarnath", "kedar nath", "केदारनाथ"],
-    "destination_badrinath": ["badrinath", "badri nath", "बद्रीनाथ", "बदरीनाथ"],
-    "destination_almora": ["almora", "अल्मोड़ा", "अल्मोडा"],
-    "destination_ranikhet": ["ranikhet", "रानीखेत"],
-}
+# How travellers write each town (aliases in the registry) is matched in code, not by the
+# LLM, so a town the traveller names is never lost or mistaken for an interest.
 _PLACE_RES = {d: re.compile("|".join(rf"(?<![a-z]){re.escape(a)}(?![a-z])" for a in aliases))
               for d, aliases in PLACE_ALIASES.items()}
 
@@ -140,23 +98,6 @@ def _says_from(text: str, place: str) -> bool:
                          text) for a in PLACE_ALIASES[place])
 
 
-# Destinations the planner may offer: each needs at least one stay and two stops in the data.
-# Auli and Kedarnath are in the data set but have too few listings; they join once enriched.
-NOT_READY = {"destination_auli", "destination_kedarnath"}
-
-# Sensible multi-stop circuits: (destinations in travel order, minimum days). Single-destination
-# options are generated automatically for every destination.
-CIRCUITS = [
-    (["destination_haridwar", "destination_rishikesh"], 2),
-    (["destination_dehradun", "destination_mussoorie"], 2),
-    (["destination_rishikesh", "destination_mussoorie"], 3),
-    (["destination_nainital", "destination_almora"], 3),
-    (["destination_nainital", "destination_ranikhet", "destination_almora"], 4),
-    (["destination_jim_corbett", "destination_nainital"], 3),
-    (["destination_rishikesh", "destination_auli"], 4),
-    (["destination_kedarnath", "destination_badrinath"], 5),
-]
-
 EXTRACT_SYSTEM = (
     "Extract trip details from the traveller's message. Return JSON only with keys: "
     '"origin" (city or null), "days" (int or null), "people" (int or null), "month" (1-12 or '
@@ -164,9 +105,25 @@ EXTRACT_SYSTEM = (
     '"interests" (list of short words), "vulnerable_travellers" (true if children, elderly or '
     'health conditions are mentioned, else false), "diet" ("veg"|"non-veg" or null), '
     '"pace" ("relaxed"|"balanced"|"packed" or null), "language" ("en" for English, "hi" for '
-    'Hindi in Devanagari, "hinglish" for Hindi written in Latin letters). Use null when not '
-    'stated; never guess (language is always one of the three).'
+    'Hindi in Devanagari, "hinglish" for Hindi written in Latin letters), "start_date" (the '
+    'first day of travel as YYYY-MM-DD, worked out from TODAY for phrases like "next Friday" or '
+    '"from 12 March"; null if no specific day is given). Use null when not stated; never guess '
+    '(language is always one of the three).'
 )
+HEAVY_RAIN_MM = 30.0  # forecast rain in a day that makes hill roads risky
+
+
+def _today() -> date:
+    return date.today()
+
+
+def valid_start(value, today: date) -> date | None:
+    """A start date we accept: a real date, not in the past, within a year."""
+    try:
+        d = date.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return d if today <= d <= today + timedelta(days=366) else None
 
 PLAN_SYSTEM = (
     "You are a trip planner for Uttarakhand. Build a day-by-day plan using ONLY the candidate "
@@ -231,6 +188,7 @@ class TripState(TypedDict, total=False):
     memories: list  # recalled at intake: preferences and past-trip episodes
     said: list  # everything the traveller typed this trip (the memory agent learns from it)
     learned: list  # preferences saved after approval
+    weather: dict  # per-day weather when the traveller gave dates
 
 
 class TripPlanner:
@@ -289,7 +247,8 @@ class TripPlanner:
                     **(state.get("request") or {})}
         res = self.llm.json(self.small, [
             {"role": "system", "content": EXTRACT_SYSTEM},
-            {"role": "user", "content": state["user_text"]}], default={})
+            {"role": "user", "content": f"TODAY: {_today():%Y-%m-%d (%A)}\n"
+                                        f"MESSAGE: {state['user_text']}"}], default={})
         merged = dict(existing)
         for key, val in res.items():
             if val not in (None, "", []):
@@ -301,6 +260,10 @@ class TripPlanner:
                 merged[key] = None
         if merged.get("month") and not 1 <= merged["month"] <= 12:
             merged["month"] = None
+        start = valid_start(merged.get("start_date"), _today()) if merged.get("start_date") else None
+        merged["start_date"] = start.isoformat() if start else None
+        if start:
+            merged["month"] = start.month  # the date decides the season
         if merged.get("days") is not None and not 1 <= merged["days"] <= 14:
             merged["days"] = None
         if merged.get("people") is not None and not 1 <= merged["people"] <= 20:
@@ -561,6 +524,50 @@ class TripPlanner:
         warnings = list(dict.fromkeys([*state["warnings"], *res["warnings"]]))
         return {"safety": res, "warnings": warnings}
 
+    # ---------------- weather agent ----------------
+    def _weather(self, state: TripState) -> TripState:
+        """With a start date: weather for every day in its town (a real forecast within 16
+        days, otherwise last year's same dates, clearly labelled). Heavy forecast rain adds a
+        warning that suggests re-planning from that day."""
+        req, plan = state["request"], state["plan"]
+        if not req.get("start_date"):
+            return {"weather": {}}
+        start = date.fromisoformat(req["start_date"])
+        blocks: list[list] = []  # [destination, first day, last day]
+        for d in plan["days"]:
+            if blocks and blocks[-1][0] == d["destination"] and blocks[-1][2] == d["day"] - 1:
+                blocks[-1][2] = d["day"]
+            else:
+                blocks.append([d["destination"], d["day"], d["day"]])
+        days, kinds = [], set()
+        for dest, a, b in blocks:
+            town = DESTINATIONS[dest]
+            try:
+                w = self.tools.call("get_weather", lat=town["lat"], lon=town["lon"],
+                                    start_date=(start + timedelta(days=a - 1)).isoformat(),
+                                    end_date=(start + timedelta(days=b - 1)).isoformat())
+            except ToolError as exc:
+                log.warning("get_weather failed for %s: %s", dest, exc)
+                continue
+            kinds.add(w.get("kind"))
+            for i, x in enumerate(w.get("days") or []):
+                days.append({**x, "day": a + i, "town": town["name"], "kind": w.get("kind")})
+        warnings = list(state["warnings"])
+        for x in days:
+            rain = x.get("rain_mm") or 0
+            if x["kind"] == "forecast" and rain >= HEAVY_RAIN_MM:
+                when = start + timedelta(days=x["day"] - 1)
+                warnings.append(f"Weather, day {x['day']} ({when:%a %d %b}, {x['town']}): heavy "
+                                f"rain forecast ({rain:.0f} mm). Hill roads can close; consider "
+                                f"re-planning from day {x['day']}.")
+        note = ""
+        if "typical" in kinds:
+            note = ("Your dates are beyond the 16-day forecast, so the weather shown is last "
+                    "year's for the same dates: a rough guide, not a forecast.")
+        return {"weather": {"days": days, "note": note,
+                            "kind": "forecast" if kinds == {"forecast"} else "typical"},
+                "warnings": list(dict.fromkeys(warnings))}
+
     # ---------------- cost ----------------
     @staticmethod
     def _stay_line(stay_id: str, nights: int, tier: str, ents: dict) -> dict:
@@ -620,7 +627,8 @@ class TripPlanner:
         """Build (and translate) the review text once. LangGraph re-runs an interrupting node
         from the top when it resumes, so slow work must not live inside the approve node."""
         text = render_itinerary(state["plan"], state["entities"], state["cost"],
-                                state["warnings"], state["request"])
+                                state["warnings"], state["request"],
+                                weather=state.get("weather"))
         return {"preview": self._loc(state, text), "timeline": self._timeline(state),
                 "approve_msg": self._loc(state, "Approve this plan, or tell me what to change?")}
 
@@ -726,7 +734,9 @@ class TripPlanner:
         return {"status": "cancelled"}
 
     def _timeline(self, state: TripState) -> dict:
-        return build_timeline(state["plan"], state["entities"], self._transfer)
+        return build_timeline(state["plan"], state["entities"], self._transfer,
+                              (state.get("request") or {}).get("start_date"),
+                              state.get("weather"))
 
     @staticmethod
     def _slim(ent: dict) -> dict:
@@ -739,7 +749,8 @@ class TripPlanner:
 
     def _finalize(self, state: TripState) -> TripState:
         plan, ents, req = state["plan"], state["entities"], state["request"]
-        english = render_itinerary(plan, ents, state["cost"], state["warnings"], req)
+        english = render_itinerary(plan, ents, state["cost"], state["warnings"], req,
+                                   weather=state.get("weather"))
         links = build_booking_links(req, plan, ents)
         used = {i for d in plan["days"] for i in
                 [*(d.get("stops") or []), *(d.get("meals") or []), d.get("stay")] if i}
@@ -762,7 +773,8 @@ class TripPlanner:
             "safety": state.get("safety", {}), "transport": state.get("transport", {}),
             "entities": {i: self._slim(ents[i]) for i in used if i in ents},
             "itinerary": text, "itinerary_en": english + "\n\n" + render_links(links),
-            "checklist": checklist, "concierge": self._concierge_summary(state, plan)}
+            "checklist": checklist, "concierge": self._concierge_summary(state, plan),
+            "weather": state.get("weather") or {}}
         return {"final": text, "structured": structured, "status": "done"}
 
     def _remember(self, state: TripState) -> TripState:
@@ -808,7 +820,8 @@ class TripPlanner:
                          ("concierge", self._concierge), ("hotel_research", self._hotel_research),
                          ("travel_info", self._travel_info), ("rank_hotels", self._rank_hotels),
                          ("choose_hotels", self._choose_hotels),
-                         ("apply_hotels", self._apply_hotels), ("remember", self._remember)):
+                         ("apply_hotels", self._apply_hotels), ("remember", self._remember),
+                         ("weather", self._weather)):
             g.add_node(name, fn)
         g.add_edge(START, "extract")
         g.add_conditional_edges("extract", self._route_after_extract,
@@ -821,7 +834,8 @@ class TripPlanner:
         g.add_edge("plan", "critic")
         g.add_conditional_edges("critic", self._route_after_critic,
                                 {"plan": "plan", "safety": "safety"})
-        g.add_edge("safety", "cost")
+        g.add_edge("safety", "weather")
+        g.add_edge("weather", "cost")
         g.add_edge("cost", "preview")
         g.add_edge("preview", "approve")
         g.add_conditional_edges("approve", self._route_after_approve,

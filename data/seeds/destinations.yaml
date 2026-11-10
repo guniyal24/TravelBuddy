@@ -1,24 +1,101 @@
-# Destinations to ingest. Add a block and re-run `python -m ingest.build` to extend coverage.
-# lat/lon are approximate centre points used as a fallback; elevation is fetched from Open-Meteo.
+# The town registry: every destination the app knows, read by the ingest pipeline and the app
+# (app/towns.py). Add a town here, run `python -m ingest.build --only <id> --merge`, load it,
+# then set `offer: true` once the quality report shows at least one stay and two places.
+#
+#   wikivoyage_page  source of listings with descriptions and prices (optional)
+#   osm_places       also take places from OpenStreetMap (for towns Wikivoyage covers thinly)
+#   lat, lon         approximate town centre; elevation_m approximate sleeping altitude
+#   themes           words matched against a traveller's interests by the circuit advisor
+#   aliases          other spellings, Hinglish and Devanagari names (matched in code)
+#   station          nearest useful railway station [code, name]; region decides the airport
+#   offer            whether the planner offers it (needs enough data)
 destinations:
-  - id: destination_haridwar
-    name: Haridwar
-    wikivoyage_page: Haridwar
-    region: Garhwal
-    lat: 29.9457
-    lon: 78.1642
-  - id: destination_rishikesh
-    name: Rishikesh
-    wikivoyage_page: Rishikesh
-    region: Garhwal
-    lat: 30.0869
-    lon: 78.2676
-  - {id: destination_dehradun, name: Dehradun, wikivoyage_page: Dehradun, region: Garhwal, lat: 30.3165, lon: 78.0322}
-  - {id: destination_mussoorie, name: Mussoorie, wikivoyage_page: Mussoorie, region: Garhwal, lat: 30.4598, lon: 78.0644}
-  - {id: destination_nainital, name: Nainital, wikivoyage_page: Nainital, region: Kumaon, lat: 29.3919, lon: 79.4542}
-  - {id: destination_jim_corbett, name: Jim Corbett, wikivoyage_page: Jim Corbett National Park, region: Kumaon, lat: 29.5300, lon: 78.7747}
-  - {id: destination_auli, name: Auli, wikivoyage_page: Auli, region: Garhwal, lat: 30.5267, lon: 79.5667}
-  - {id: destination_kedarnath, name: Kedarnath, wikivoyage_page: Kedarnath, region: Garhwal, lat: 30.7352, lon: 79.0669}
-  - {id: destination_badrinath, name: Badrinath, wikivoyage_page: Badrinath, region: Garhwal, lat: 30.7433, lon: 79.4938}
-  - {id: destination_almora, name: Almora, wikivoyage_page: Almora, region: Kumaon, lat: 29.5971, lon: 79.6591}
-  - {id: destination_ranikhet, name: Ranikhet, wikivoyage_page: Ranikhet, region: Kumaon, lat: 29.6434, lon: 79.4322}
+  # ---- Garhwal ----
+  - {id: destination_haridwar, name: Haridwar, wikivoyage_page: Haridwar, region: Garhwal, lat: 29.9457, lon: 78.1642, elevation_m: 250, offer: true,
+     themes: [temple, pilgrim, aarti, ganga, spiritual], aliases: [hardwar, हरिद्वार], station: [HW, Haridwar Junction]}
+  - {id: destination_rishikesh, name: Rishikesh, wikivoyage_page: Rishikesh, region: Garhwal, lat: 30.0869, lon: 78.2676, elevation_m: 340, offer: true,
+     themes: [yoga, rafting, adventure, cafe, ashram, meditation, music], aliases: [hrishikesh, ऋषिकेश], station: [YNRK, Yog Nagari Rishikesh]}
+  - {id: destination_dehradun, name: Dehradun, wikivoyage_page: Dehradun, region: Garhwal, lat: 30.3165, lon: 78.0322, elevation_m: 640, offer: true,
+     themes: [food, cafe, shopping, museum, family], aliases: [dehra dun, doon, देहरादून], station: [DDN, Dehradun]}
+  - {id: destination_mussoorie, name: Mussoorie, wikivoyage_page: Mussoorie, region: Garhwal, lat: 30.4598, lon: 78.0644, elevation_m: 2000, offer: true,
+     themes: [hill, honeymoon, waterfall, mall road, views, family, snow], aliases: [mussorie, masoori, mussourie, landour, मसूरी], station: [DDN, Dehradun (for Mussoorie)]}
+  - {id: destination_auli, name: Auli, wikivoyage_page: Auli, region: Garhwal, lat: 30.5267, lon: 79.5667, elevation_m: 2800, offer: false, osm_places: true, radius_m: 7000,
+     themes: [ski, snow, skiing, trek, adventure, views, honeymoon], aliases: [औली], station: [HW, Haridwar Junction]}
+  - {id: destination_kedarnath, name: Kedarnath, wikivoyage_page: Kedarnath, region: Garhwal, lat: 30.7352, lon: 79.0669, elevation_m: 3580, offer: false, osm_places: true, radius_m: 6000,
+     themes: [pilgrim, temple, char dham, chardham, trek, spiritual], aliases: [kedar nath, केदारनाथ], station: [HW, Haridwar Junction],
+     access_note: "Roads end at Gaurikund; the last 16 km is a trek (ponies, palkis and helicopters are available)."}
+  - {id: destination_badrinath, name: Badrinath, wikivoyage_page: Badrinath, region: Garhwal, lat: 30.7433, lon: 79.4938, elevation_m: 3300, offer: true,
+     themes: [pilgrim, temple, char dham, chardham, spiritual], aliases: [badri nath, बद्रीनाथ, बदरीनाथ], station: [HW, Haridwar Junction]}
+  - {id: destination_dhanaulti, name: Dhanaulti, wikivoyage_page: Dhanaulti, region: Garhwal, lat: 30.4268, lon: 78.2464, elevation_m: 2286, offer: false, osm_places: true,
+     themes: [forest, snow, quiet, views, family, camping], aliases: [dhanolti, धनौल्टी], station: [DDN, Dehradun]}
+  - {id: destination_kanatal, name: Kanatal, region: Garhwal, lat: 30.4120, lon: 78.3590, elevation_m: 2590, offer: false, osm_places: true,
+     description: "A small ridge village on the Chamba-Mussoorie road, known for camping, apple orchards and views of the Garhwal Himalaya.",
+     themes: [views, camping, adventure, snow, quiet], aliases: [कनाताल], station: [DDN, Dehradun]}
+  - {id: destination_chakrata, name: Chakrata, wikivoyage_page: Chakrata, region: Garhwal, lat: 30.7020, lon: 77.8686, elevation_m: 2118, offer: false, osm_places: true,
+     themes: [forest, waterfall, quiet, trek, views], aliases: [चकराता], station: [DDN, Dehradun]}
+  - {id: destination_lansdowne, name: Lansdowne, wikivoyage_page: Lansdowne, region: Garhwal, lat: 29.8377, lon: 78.6871, elevation_m: 1706, offer: false, osm_places: true,
+     description: "A quiet cantonment hill town in Pauri Garhwal with oak and pine forests, old churches and the Garhwal Rifles museum.",
+     themes: [quiet, forest, walks, views, heritage], aliases: [lansdown, लैंसडाउन], station: [KTW, Kotdwar]}
+  - {id: destination_joshimath, name: Joshimath, wikivoyage_page: Joshimath, region: Garhwal, lat: 30.5550, lon: 79.5643, elevation_m: 1875, offer: false, osm_places: true,
+     themes: [pilgrim, trek, ropeway, snow, views, gateway], aliases: [jyotirmath, जोशीमठ], station: [HW, Haridwar Junction]}
+  - {id: destination_ghangaria, name: Valley of Flowers (Ghangaria), wikivoyage_page: Valley of Flowers National Park, region: Garhwal, lat: 30.6990, lon: 79.6110, elevation_m: 3050, offer: false, osm_places: true, radius_m: 8000,
+     themes: [trek, flowers, nature, pilgrim, meadows], aliases: [ghangaria, valley of flowers, hemkund, hemkund sahib, फूलों की घाटी, घांघरिया], station: [HW, Haridwar Junction],
+     access_note: "Roads end at Govindghat; the last 10 km to Ghangaria is a trek (ponies and helicopters are available)."}
+  - {id: destination_chopta, name: Chopta, wikivoyage_page: Chopta, region: Garhwal, lat: 30.4846, lon: 79.2147, elevation_m: 2680, offer: false, osm_places: true, radius_m: 10000,
+     description: "Meadows and forest at the start of the Tungnath and Chandrashila trek, often called mini Switzerland.",
+     themes: [trek, meadows, tungnath, snow, birding, camping], aliases: [tungnath, chandrashila, चोपता], station: [HW, Haridwar Junction]}
+  - {id: destination_uttarkashi, name: Uttarkashi, wikivoyage_page: Uttarkashi, region: Garhwal, lat: 30.7268, lon: 78.4354, elevation_m: 1158, offer: false, osm_places: true,
+     themes: [pilgrim, temple, river, trek, gateway], aliases: [uttar kashi, उत्तरकाशी], station: [DDN, Dehradun]}
+  - {id: destination_gangotri, name: Gangotri, wikivoyage_page: Gangotri, region: Garhwal, lat: 30.9947, lon: 78.9398, elevation_m: 3100, offer: false, osm_places: true,
+     themes: [pilgrim, char dham, chardham, temple, trek, glacier], aliases: [गंगोत्री], station: [DDN, Dehradun]}
+  # ---- Kumaon ----
+  - {id: destination_nainital, name: Nainital, wikivoyage_page: Nainital, region: Kumaon, lat: 29.3919, lon: 79.4542, elevation_m: 2000, offer: true,
+     themes: [lake, boating, hill, honeymoon, views, family], aliases: [naini tal, नैनीताल], station: [KGM, Kathgodam]}
+  - {id: destination_jim_corbett, name: Jim Corbett, wikivoyage_page: Jim Corbett National Park, region: Kumaon, lat: 29.5300, lon: 78.7747, elevation_m: 400, offer: true,
+     themes: [wildlife, safari, tiger, nature, jungle, birding, family], aliases: [corbett, ramnagar, जिम कॉर्बेट, कॉर्बेट], station: [RMR, Ramnagar (for Jim Corbett)]}
+  - {id: destination_almora, name: Almora, wikivoyage_page: Almora, region: Kumaon, lat: 29.5971, lon: 79.6591, elevation_m: 1650, offer: true,
+     themes: [culture, heritage, craft, food, views, quiet], aliases: [अल्मोड़ा, अल्मोडा], station: [KGM, Kathgodam]}
+  - {id: destination_ranikhet, name: Ranikhet, wikivoyage_page: Ranikhet, region: Kumaon, lat: 29.6434, lon: 79.4322, elevation_m: 1830, offer: true,
+     themes: [quiet, golf, views, hill, nature, family], aliases: [रानीखेत], station: [KGM, Kathgodam]}
+  - {id: destination_bhimtal, name: Bhimtal, wikivoyage_page: Bhimtal, region: Kumaon, lat: 29.3436, lon: 79.5630, elevation_m: 1370, offer: false, osm_places: true,
+     themes: [lake, boating, family, quiet, birding], aliases: [bhim tal, भीमताल], station: [KGM, Kathgodam]}
+  - {id: destination_mukteshwar, name: Mukteshwar, wikivoyage_page: Mukteshwar, region: Kumaon, lat: 29.4722, lon: 79.6479, elevation_m: 2171, offer: false, osm_places: true,
+     themes: [views, orchard, quiet, adventure, temple, hill], aliases: [mukteswar, मुक्तेश्वर], station: [KGM, Kathgodam]}
+  - {id: destination_kausani, name: Kausani, wikivoyage_page: Kausani, region: Kumaon, lat: 29.8430, lon: 79.6045, elevation_m: 1890, offer: false, osm_places: true,
+     themes: [views, himalaya, quiet, tea, sunrise, hill], aliases: [कौसानी], station: [KGM, Kathgodam]}
+  - {id: destination_jageshwar, name: Jageshwar, wikivoyage_page: Jageshwar, region: Kumaon, lat: 29.6378, lon: 79.8540, elevation_m: 1870, offer: false, osm_places: true,
+     themes: [temple, heritage, forest, spiritual, quiet], aliases: [jageswar, जागेश्वर], station: [KGM, Kathgodam]}
+  - {id: destination_binsar, name: Binsar, wikivoyage_page: Binsar, region: Kumaon, lat: 29.6987, lon: 79.7546, elevation_m: 2420, offer: false, osm_places: true,
+     description: "A wildlife sanctuary of oak and rhododendron forest above Almora, with a famous Zero Point view of the Himalaya.",
+     themes: [wildlife, forest, birding, views, quiet], aliases: [बिनसर], station: [KGM, Kathgodam]}
+  - {id: destination_munsiyari, name: Munsiyari, region: Kumaon, lat: 30.0676, lon: 80.2384, elevation_m: 2200, offer: false, osm_places: true,
+     description: "A remote Kumaon town facing the Panchachuli peaks, base for Khaliya Top and Milam glacier treks.",
+     themes: [trek, himalaya, views, snow, culture], aliases: [munsyari, मुनस्यारी], station: [KGM, Kathgodam]}
+  - {id: destination_pithoragarh, name: Pithoragarh, wikivoyage_page: Pithoragarh, region: Kumaon, lat: 29.5829, lon: 80.2182, elevation_m: 1514, offer: false, osm_places: true,
+     themes: [fort, views, quiet, culture], aliases: [पिथौरागढ़], station: [TPU, Tanakpur]}
+
+# Ready-made multi-town circuits: [towns in travel order], minimum days. Single towns and the
+# towns a traveller names are offered automatically.
+circuits:
+  - [[destination_haridwar, destination_rishikesh], 2]
+  - [[destination_dehradun, destination_mussoorie], 2]
+  - [[destination_rishikesh, destination_mussoorie], 3]
+  - [[destination_mussoorie, destination_dhanaulti], 2]
+  - [[destination_dhanaulti, destination_kanatal], 2]
+  - [[destination_dehradun, destination_chakrata], 2]
+  - [[destination_rishikesh, destination_chopta], 3]
+  - [[destination_joshimath, destination_auli], 2]
+  - [[destination_joshimath, destination_ghangaria], 3]
+  - [[destination_rishikesh, destination_auli], 4]
+  - [[destination_uttarkashi, destination_gangotri], 3]
+  - [[destination_kedarnath, destination_badrinath], 5]
+  - [[destination_nainital, destination_almora], 3]
+  - [[destination_nainital, destination_bhimtal], 2]
+  - [[destination_nainital, destination_mukteshwar], 2]
+  - [[destination_nainital, destination_ranikhet, destination_almora], 4]
+  - [[destination_almora, destination_kausani], 3]
+  - [[destination_almora, destination_jageshwar], 2]
+  - [[destination_almora, destination_binsar], 2]
+  - [[destination_nainital, destination_almora, destination_kausani], 4]
+  - [[destination_munsiyari, destination_pithoragarh], 3]
+  - [[destination_jim_corbett, destination_nainital], 3]

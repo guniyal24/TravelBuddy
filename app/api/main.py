@@ -390,7 +390,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Content-Disposition": 'attachment; filename="uttarakhand-trip.pdf"'})
         if format == "ics":
             try:
-                first_day = date.fromisoformat(start or "")
+                first_day = date.fromisoformat(
+                    start or (trip.get("request") or {}).get("start_date") or "")
             except ValueError:
                 raise HTTPException(status_code=400,
                                     detail="Give the first day as start=YYYY-MM-DD.") from None

@@ -39,7 +39,10 @@ def _hop_minutes(a: dict | None, b: dict | None) -> tuple[int, str]:
     return max(15, ceil(km / HILL_KMH * 60)), f"about {km:.0f} km by road"
 
 
-def build_timeline(plan: dict, entities: dict[str, dict], transfer_fn=None) -> dict:
+def build_timeline(plan: dict, entities: dict[str, dict], transfer_fn=None,
+                   start_date: str | None = None, weather: dict | None = None) -> dict:
+    from app.graph.render import day_date
+    by_day = {w["day"]: w for w in (weather or {}).get("days", [])}
     days_out, points = [], []
     prev_dest = None
     for d in plan["days"]:
@@ -86,8 +89,10 @@ def build_timeline(plan: dict, entities: dict[str, dict], transfer_fn=None) -> d
             items.append(_item("meal", max(cursor, DINNER_MIN), MEAL_MINUTES, meals[1],
                                f"Dinner: {meals[1]['name']}"))
         items.sort(key=lambda x: x["time"])
+        when = day_date({"start_date": start_date}, d["day"])
         days_out.append({"day": d["day"], "destination": dest, "label": _pretty(dest),
-                         "items": items})
+                         "date": when.isoformat() if when else None,
+                         "weather": by_day.get(d["day"]), "items": items})
         for order, it in enumerate(items, 1):
             if it["lat"] is not None and it["lon"] is not None:
                 points.append({"day": d["day"], "order": order, "kind": it["kind"],
