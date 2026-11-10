@@ -89,3 +89,20 @@ def test_a_paused_trip_survives_a_restart_on_postgres():
     r = tp2.resume(thread, {"action": "approve"})
     assert r["status"] == "done" and "Day 1 - Haridwar" in r["itinerary"]
     close_checkpointer(saver2)
+
+
+@needs_pg
+def test_store_survives_the_server_closing_idle_connections():
+    # Neon closes idle connections when its compute suspends; the next request must not fail
+    import psycopg
+
+    store = TripStore(PG_URL)
+    try:
+        assert store.trip_usage("warm-up")["runs"] == 0
+        with psycopg.connect(PG_URL, autocommit=True) as admin:
+            admin.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                          "WHERE pid <> pg_backend_pid() AND datname = current_database() "
+                          "AND usename = current_user")
+        assert store.trip_usage("after-drop")["runs"] == 0
+    finally:
+        store.close()
