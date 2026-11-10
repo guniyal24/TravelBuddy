@@ -80,6 +80,18 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: python -m eval.run --systems self_rag
       - run: python -m eval.gate
+      - run: python -m eval.plans
+      - run: python -m eval.gate --plans
+      - run: python -m eval.redteam  # exits non-zero if any attack succeeds
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-reports
+          path: |
+            eval/RESULTS.md
+            eval/PLANS.md
+            eval/REDTEAM.md
+            eval/results/*.json
 
   deploy:
     runs-on: ubuntu-latest

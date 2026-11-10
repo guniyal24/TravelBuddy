@@ -108,7 +108,7 @@ export default function Landing({ onLogin, onRegister, onGuest, guestBusy }) {
       <section id="destinations" className="section alt">
         <div className="container">
           <p className="eyebrow">Destinations</p>
-          <h2 className="section-title">Nine towns, planned end to end</h2>
+          <h2 className="section-title">26 towns, from the Ganga to the Char Dham</h2>
           <div className="dest-grid">
             {DESTINATIONS.map((d) => (
               <button key={d.id} className="dest-card" onClick={onGuest}
@@ -121,7 +121,7 @@ export default function Landing({ onLogin, onRegister, onGuest, guestBusy }) {
             ))}
           </div>
           <p className="muted center-text">
-            Auli and Kedarnath are coming soon. They are not offered yet because there is not enough verified data.
+            A few favourites. The planner also covers Kedarnath, Auli, the Valley of Flowers, Chopta, Kausani, Mukteshwar, Bhimtal, Lansdowne, Munsiyari and more across Garhwal and Kumaon.
           </p>
         </div>
       </section>

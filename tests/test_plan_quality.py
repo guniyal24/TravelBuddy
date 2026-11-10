@@ -1,5 +1,6 @@
 """Plan-quality fixes: meals/stops stay in the day's town, the veg filter catches bars, and
 towns the traveller names steer the circuit."""
+import pytest
 from test_trip_graph import ENTS, GOOD, HW, RK, make
 
 from app.graph.agents import FoodAgent
@@ -96,9 +97,10 @@ def test_single_named_town_beats_bigger_circuits():
 
 
 def test_unavailable_town_is_explained_not_silently_dropped():
-    prompt, _ = _choose("4 days in Auli for skiing", {"days": 4, "interests": ["ski"]})
-    assert prompt["message"].startswith("Auli can't be planned yet")
-    assert all("auli" not in o["id"] for o in prompt["options"])
+    # Jageshwar is in the registry but has no stays in the data, so it is not offered yet
+    prompt, _ = _choose("4 days in Jageshwar for the temples", {"days": 4, "interests": []})
+    assert prompt["message"].startswith("Jageshwar can't be planned yet")
+    assert all("jageshwar" not in o["id"] for o in prompt["options"])
 
 
 def test_first_named_town_is_not_mistaken_for_the_origin():
@@ -128,3 +130,131 @@ def test_places_survive_a_follow_up_answer():
     tp.start("f", "3 days in Rishikesh")
     r = tp.resume("f", "2 people in November")
     assert r["prompt"]["options"][0]["id"] == "destination_rishikesh"
+
+
+def test_named_towns_without_a_ready_circuit_get_one_built_for_them():
+    prompt, _ = _choose("Ranikhet and Almora for 3 days, vegetarian",
+                        {"days": 3, "interests": []})
+    assert prompt["options"][0]["id"] == "destination_ranikhet+destination_almora"
+    prompt, _ = _choose("Rishikesh and Badrinath in 5 days", {"days": 5, "interests": []})
+    assert set(prompt["options"][0]["id"].split("+")) == {"destination_rishikesh",
+                                                          "destination_badrinath"}
+
+
+def test_built_circuit_needs_a_day_per_town_and_follows_the_road():
+    from app.graph.trip_graph import _route_order
+    prompt, _ = _choose("Haridwar, Almora and Mussoorie in 2 days", {"days": 2, "interests": []})
+    assert all(len(o["id"].split("+")) <= 2 for o in prompt["options"])
+    # Almora is far from the other two, so it is not visited in the middle
+    route = _route_order(["destination_haridwar", "destination_almora", "destination_mussoorie"])
+    assert route == ["destination_haridwar", "destination_mussoorie", "destination_almora"]
+
+
+# ---------- a failing knowledge base never yields an empty plan ----------
+def test_retriever_strict_mode_retries_then_raises(monkeypatch):
+    from app.rag.retriever import RetrievalError, Retriever
+
+    class Index:
+        calls = 0
+
+        def query(self, **kw):
+            Index.calls += 1
+            raise TimeoutError("slow")
+
+    class Emb:
+        def create(self, **kw):
+            return type("R", (), {"data": [type("D", (), {"embedding": [0.1]})()]})()
+
+    r = Retriever(type("E", (), {"embeddings": Emb()})(), Index(), "m")
+    assert r.search("q") == []  # default: chat declines honestly
+    Index.calls = 0
+    with pytest.raises(RetrievalError):
+        r.search("q", strict=True, attempts=3)
+    assert Index.calls == 3
+
+
+def test_planner_stops_with_a_clear_message_when_search_fails():
+    from test_trip_graph import REQ, FakeLLM, FakeStore
+
+    from app.graph.trip_graph import PlanningUnavailable, TripPlanner
+    from app.rag.retriever import RetrievalError
+
+    class DownRetriever:
+        def search(self, *a, **kw):
+            raise RetrievalError("down")
+
+    tp = TripPlanner(FakeLLM([REQ]), DownRetriever(), FakeStore(), "s", "b")
+    tp.start("d", "x")
+    with pytest.raises(PlanningUnavailable, match="not responding"):
+        tp.resume("d", f"{HW}+{RK}")
+
+
+def test_planner_treats_empty_research_as_an_outage():
+    from test_trip_graph import REQ, FakeLLM, FakeStore
+
+    from app.graph.trip_graph import PlanningUnavailable, TripPlanner
+
+    class EmptyRetriever:
+        def search(self, *a, **kw):
+            return []
+
+    tp = TripPlanner(FakeLLM([REQ]), EmptyRetriever(), FakeStore(), "s", "b")
+    tp.start("e", "x")
+    with pytest.raises(PlanningUnavailable):
+        tp.resume("e", f"{HW}+{RK}")
+
+
+def test_api_turns_an_outage_into_a_503_and_a_stream_error():
+    import fakeredis
+    from conftest import FakeRAG, FakeStore
+    from fastapi.testclient import TestClient
+
+    from app.api.main import create_app
+    from app.api.ratelimit import RateLimiter
+    from app.config import Settings
+    from app.graph.trip_graph import UNAVAILABLE_MSG, PlanningUnavailable
+    from app.trips.store import TripStore
+
+    class DownPlanner:
+        def start(self, *a, **kw):
+            raise PlanningUnavailable(UNAVAILABLE_MSG)
+
+    app = create_app(Settings(secret_key="test-secret-key-at-least-16-chars"))
+    app.state.store, app.state.rag, app.state.planner = FakeStore(), FakeRAG(), DownPlanner()
+    app.state.trips = TripStore(":memory:")
+    app.state.limiter = RateLimiter(fakeredis.FakeRedis(), 10)
+    with TestClient(app) as c:
+        h = {"Authorization": "Bearer " + c.post("/api/guest").json()["access_token"]}
+        r = c.post("/api/trips", json={"text": "x"}, headers=h)
+        assert r.status_code == 503 and r.json()["detail"] == UNAVAILABLE_MSG
+        s = c.post("/api/trips?stream=true", json={"text": "x"}, headers=h)
+        assert UNAVAILABLE_MSG in s.text and '"type": "error"' in s.text
+
+
+# ---------- ablation switches (evaluation only) ----------
+def test_critic_ablation_lets_an_invalid_draft_through():
+    from test_trip_graph import REQ, FakeLLM, FakeRetriever, FakeStore
+
+    from app.graph.trip_graph import TripPlanner
+    bad = {"days": [{"day": 1, "destination": HW, "stops": ["INVENTED"], "meals": [],
+                     "stay": "s_hw1"}, *GOOD["days"][1:]]}
+    tp = TripPlanner(FakeLLM([REQ, bad]), FakeRetriever(), FakeStore(), "s", "b",
+                     ablate=frozenset({"critic"}))
+    tp.start("a", "x")
+    r = tp.resume("a", f"{HW}+{RK}")
+    assert r["prompt"]["plan"]["days"][0]["stops"] == ["INVENTED"]  # nothing caught it
+
+
+def test_food_ablation_skips_the_diet_filter():
+    from test_trip_graph import REQ, FakeLLM, FakeRetriever, FakeStore
+
+    from app.graph.trip_graph import TripPlanner
+    on = TripPlanner(FakeLLM([{**REQ, "diet": "veg"}]), FakeRetriever(), FakeStore(), "s", "b")
+    off = TripPlanner(FakeLLM([{**REQ, "diet": "veg"}]), FakeRetriever(), FakeStore(), "s",
+                      "b", ablate=frozenset({"food"}))
+    state = {"request": {**REQ, "diet": "veg"}, "destinations": [HW],
+             "candidates": {HW: {"stops": [], "stays": [], "meals": [
+                 {"id": "m1", "name": "Chicken Corner", "description": "chicken curry"},
+                 {"id": "m2", "name": "Sattvik", "description": "pure veg thali"}]}}}
+    assert [m["id"] for m in on._specialists(state)["candidates"][HW]["meals"]] == ["m2"]
+    assert [m["id"] for m in off._specialists(state)["candidates"][HW]["meals"]] == ["m1", "m2"]

@@ -19,11 +19,13 @@ import logging
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, TypedDict
+from copy import deepcopy
+from datetime import date, timedelta
+from typing import Annotated, Any, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, Send, interrupt
 
 from app.booking.links import build_booking_links, render_links
 from app.cost.pricing import parse_price_range
@@ -33,67 +35,35 @@ from app.graph.agents import (
     StayAgent,
     TransportAgent,
 )
+from app.graph.concierge import HotelAgent, TravelInfoAgent
 from app.graph.critic import fallback_plan, validate_plan
 from app.graph.render import render_itinerary
 from app.graph.schedule import build_timeline
 from app.graph.trace import Tracer
+from app.memory import TravelMemory, extract_preferences, trip_episode
+from app.rag.retriever import RetrievalError
+from app.towns import CIRCUITS, DESTINATIONS, NOT_READY, PLACE_ALIASES  # noqa: F401
+from app.usage import Meter, in_context, metered
 from mcp_server.client import LocalTools, ToolError
 
 log = logging.getLogger(__name__)
 
 OnEvent = Callable[[dict], None] | None
+UNAVAILABLE_MSG = ("The places database is not responding right now, so I can't build a "
+                   "reliable plan. Please try again in a minute.")
+
+
+class PlanningUnavailable(Exception):
+    """A data store the planner depends on is down. The run stops instead of producing an
+    empty or made-up plan; the message is safe to show the traveller."""
 
 MAX_ASKS = 2
 MAX_PLAN_ATTEMPTS = 3
 MAX_EDITS = 3
 REQUIRED = ("days", "people", "month")
 
-DESTINATIONS = {
-    "destination_haridwar": {"name": "Haridwar", "lat": 29.9457, "lon": 78.1642,
-                             "themes": ["temple", "pilgrim", "aarti", "ganga", "spiritual"]},
-    "destination_rishikesh": {"name": "Rishikesh", "lat": 30.0869, "lon": 78.2676,
-                              "themes": ["yoga", "rafting", "adventure", "cafe", "ashram",
-                                         "meditation", "music"]},
-    "destination_dehradun": {"name": "Dehradun", "lat": 30.3165, "lon": 78.0322,
-                             "themes": ["food", "cafe", "shopping", "museum", "family"]},
-    "destination_mussoorie": {"name": "Mussoorie", "lat": 30.4598, "lon": 78.0644,
-                              "themes": ["hill", "honeymoon", "waterfall", "mall road", "views",
-                                         "family", "snow"]},
-    "destination_nainital": {"name": "Nainital", "lat": 29.3919, "lon": 79.4542,
-                             "themes": ["lake", "boating", "hill", "honeymoon", "views", "family"]},
-    "destination_jim_corbett": {"name": "Jim Corbett", "lat": 29.5300, "lon": 78.7747,
-                                "themes": ["wildlife", "safari", "tiger", "nature", "jungle",
-                                           "birding", "family"]},
-    "destination_auli": {"name": "Auli", "lat": 30.5267, "lon": 79.5667,
-                         "themes": ["ski", "snow", "skiing", "trek", "adventure", "views",
-                                    "honeymoon"]},
-    "destination_kedarnath": {"name": "Kedarnath", "lat": 30.7352, "lon": 79.0669,
-                              "themes": ["pilgrim", "temple", "char dham", "chardham", "trek",
-                                         "spiritual"]},
-    "destination_badrinath": {"name": "Badrinath", "lat": 30.7433, "lon": 79.4938,
-                              "themes": ["pilgrim", "temple", "char dham", "chardham",
-                                         "spiritual"]},
-    "destination_almora": {"name": "Almora", "lat": 29.5971, "lon": 79.6591,
-                           "themes": ["culture", "heritage", "craft", "food", "views", "quiet"]},
-    "destination_ranikhet": {"name": "Ranikhet", "lat": 29.6434, "lon": 79.4322,
-                             "themes": ["quiet", "golf", "views", "hill", "nature", "family"]},
-}
-
-# How travellers write each town (English spellings, Hinglish, Devanagari). Matched in code, not
-# by the LLM, so a town the traveller names is never lost or mistaken for an interest.
-PLACE_ALIASES = {
-    "destination_haridwar": ["haridwar", "hardwar", "हरिद्वार"],
-    "destination_rishikesh": ["rishikesh", "hrishikesh", "ऋषिकेश"],
-    "destination_dehradun": ["dehradun", "dehra dun", "doon", "देहरादून"],
-    "destination_mussoorie": ["mussoorie", "mussorie", "masoori", "mussourie", "मसूरी"],
-    "destination_nainital": ["nainital", "naini tal", "नैनीताल"],
-    "destination_jim_corbett": ["jim corbett", "corbett", "जिम कॉर्बेट", "कॉर्बेट"],
-    "destination_auli": ["auli", "औली"],
-    "destination_kedarnath": ["kedarnath", "kedar nath", "केदारनाथ"],
-    "destination_badrinath": ["badrinath", "badri nath", "बद्रीनाथ", "बदरीनाथ"],
-    "destination_almora": ["almora", "अल्मोड़ा", "अल्मोडा"],
-    "destination_ranikhet": ["ranikhet", "रानीखेत"],
-}
+# How travellers write each town (aliases in the registry) is matched in code, not by the
+# LLM, so a town the traveller names is never lost or mistaken for an interest.
 _PLACE_RES = {d: re.compile("|".join(rf"(?<![a-z]){re.escape(a)}(?![a-z])" for a in aliases))
               for d, aliases in PLACE_ALIASES.items()}
 
@@ -105,29 +75,59 @@ def named_places(text: str) -> list[str]:
     return [d for _, d in sorted(found)]
 
 
+def split_sections(text: str, min_chars: int = 600) -> list[str]:
+    """Split markdown at '## ' headings into sections worth translating separately; short
+    texts stay whole. Joining the parts with blank lines restores the document."""
+    if len(text) < min_chars:
+        return [text]
+    parts, cur = [], []
+    for line in text.splitlines():
+        if line.startswith("## ") and cur:
+            parts.append("\n".join(cur).strip("\n"))
+            cur = []
+        cur.append(line)
+    if cur:
+        parts.append("\n".join(cur).strip("\n"))
+    return [p for p in parts if p.strip()] or [text]
+
+
+def split_lines(section: str, max_chars: int = 300) -> list[str]:
+    """Split one section into groups of whole lines of at most ~max_chars, so no single slow
+    piece dominates a parallel translation. Joining with newlines restores the section."""
+    groups, cur = [], []
+    for line in section.splitlines():
+        if cur and sum(len(x) + 1 for x in cur) + len(line) > max_chars:
+            groups.append("\n".join(cur))
+            cur = []
+        cur.append(line)
+    if cur:
+        groups.append("\n".join(cur))
+    return groups or [section]
+
+
+def _route_order(places: list[str]) -> list[str]:
+    """Visit order for an ad-hoc circuit: start where the traveller started naming towns, then
+    always go to the nearest town not yet visited (straight-line distance)."""
+    from ingest.geo import haversine_km
+
+    def km(a: str, b: str) -> float:
+        return haversine_km(DESTINATIONS[a]["lat"], DESTINATIONS[a]["lon"],
+                            DESTINATIONS[b]["lat"], DESTINATIONS[b]["lon"])
+
+    route, rest = [places[0]], list(places[1:])
+    while rest:
+        nxt = min(rest, key=lambda p: km(route[-1], p))
+        route.append(nxt)
+        rest.remove(nxt)
+    return route
+
+
 def _says_from(text: str, place: str) -> bool:
     """True if the text names `place` as the starting point: "from X" or Hindi "X se"."""
     text = (text or "").lower()
     return any(re.search(rf"(?<![a-z])(from\s+{re.escape(a)}|{re.escape(a)}\s+(se|से))(?![a-z])",
                          text) for a in PLACE_ALIASES[place])
 
-
-# Destinations the planner may offer: each needs at least one stay and two stops in the data.
-# Auli and Kedarnath are in the data set but have too few listings; they join once enriched.
-NOT_READY = {"destination_auli", "destination_kedarnath"}
-
-# Sensible multi-stop circuits: (destinations in travel order, minimum days). Single-destination
-# options are generated automatically for every destination.
-CIRCUITS = [
-    (["destination_haridwar", "destination_rishikesh"], 2),
-    (["destination_dehradun", "destination_mussoorie"], 2),
-    (["destination_rishikesh", "destination_mussoorie"], 3),
-    (["destination_nainital", "destination_almora"], 3),
-    (["destination_nainital", "destination_ranikhet", "destination_almora"], 4),
-    (["destination_jim_corbett", "destination_nainital"], 3),
-    (["destination_rishikesh", "destination_auli"], 4),
-    (["destination_kedarnath", "destination_badrinath"], 5),
-]
 
 EXTRACT_SYSTEM = (
     "Extract trip details from the traveller's message. Return JSON only with keys: "
@@ -136,9 +136,25 @@ EXTRACT_SYSTEM = (
     '"interests" (list of short words), "vulnerable_travellers" (true if children, elderly or '
     'health conditions are mentioned, else false), "diet" ("veg"|"non-veg" or null), '
     '"pace" ("relaxed"|"balanced"|"packed" or null), "language" ("en" for English, "hi" for '
-    'Hindi in Devanagari, "hinglish" for Hindi written in Latin letters). Use null when not '
-    'stated; never guess (language is always one of the three).'
+    'Hindi in Devanagari, "hinglish" for Hindi written in Latin letters), "start_date" (the '
+    'first day of travel as YYYY-MM-DD, worked out from TODAY for phrases like "next Friday" or '
+    '"from 12 March"; null if no specific day is given). Use null when not stated; never guess '
+    '(language is always one of the three).'
 )
+HEAVY_RAIN_MM = 30.0  # forecast rain in a day that makes hill roads risky
+
+
+def _today() -> date:
+    return date.today()
+
+
+def valid_start(value, today: date) -> date | None:
+    """A start date we accept: a real date, not in the past, within a year."""
+    try:
+        d = date.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return d if today <= d <= today + timedelta(days=366) else None
 
 PLAN_SYSTEM = (
     "You are a trip planner for Uttarakhand. Build a day-by-day plan using ONLY the candidate "
@@ -150,6 +166,16 @@ PLAN_SYSTEM = (
     "come from that day's destination (if it has no eateries, leave meals empty); do not "
     "repeat a stop; keep each day's stops in one area."
 )
+
+
+RESET = "__reset__"
+
+
+def _collect(old: list | None, new) -> list:
+    """Reducer for parallel hotel agents: each appends its town; RESET starts a new round."""
+    if new == RESET:
+        return []
+    return [*(old or []), *(new or [])]
 
 
 class TripState(TypedDict, total=False):
@@ -183,12 +209,29 @@ class TripState(TypedDict, total=False):
     replan_from: int
     structured: dict
     status: str  # running | done | cancelled
+    # Concierge stage (after approval)
+    hotel_findings: Annotated[list, _collect]  # one entry per overnight town, in parallel
+    travel: dict  # web-search travel notes
+    concierge: dict  # ranked hotels per town + travel notes, shown for the hotel choice
+    hotels_msg: str
+    hotel_choice: dict  # {destination id: chosen stay id}
+    # Long-term memory
+    memories: list  # recalled at intake: preferences and past-trip episodes
+    said: list  # everything the traveller typed this trip (the memory agent learns from it)
+    learned: list  # preferences saved after approval
+    weather: dict  # per-day weather when the traveller gave dates
 
 
 class TripPlanner:
     def __init__(self, llm, retriever, store, small_model: str, big_model: str,
-                 checkpointer=None, tools=None):
+                 checkpointer=None, tools=None, concierge: bool = False,
+                 memory: TravelMemory | None = None, ablate: frozenset = frozenset()):
         self.llm, self.retriever, self.store = llm, retriever, store
+        self.concierge = concierge  # research hotels and travel info after approval
+        self.memory = memory  # long-term memory across trips (None: off)
+        # Evaluation only: switch a component off to measure what it contributes
+        # ("critic": accept the LLM's first draft; "food": skip the diet filter).
+        self.ablate = frozenset(ablate)
         self.small, self.big = small_model, big_model
         self.tools = tools or LocalTools()  # LocalTools (direct) or MCPTools (via MCP)
         self.graph = self._build(checkpointer or MemorySaver())
@@ -211,23 +254,35 @@ class TripPlanner:
 
     def _loc(self, state: TripState, text: str) -> str:
         """Translate user-facing text into the traveller's language (Hindi / Hinglish).
-        English, or any failure, returns the text unchanged."""
+        English, or any failure, returns the text unchanged. Long texts are split at markdown
+        headings and the sections translated in parallel: latency is dominated by output
+        length, so N sections take about 1/N of the time (measured in the Phase 5 notes)."""
         lang = (state.get("request") or {}).get("language", "en")
         if lang not in ("hi", "hinglish") or not text:
             return text
         style = ("Hindi in Devanagari script" if lang == "hi"
                  else "Hinglish: Hindi written ONLY in Latin letters (never Devanagari)")
-        try:
-            out = self.llm.complete(self.small, [
-                {"role": "system", "content": (
-                    f"Translate the user's text into {style}. Keep markdown structure, URLs, "
-                    "numbers, currency amounts, place names, hotel and restaurant names "
-                    "exactly as written. Output only the translation.")},
-                {"role": "user", "content": text}], max_tokens=3000)
-        except Exception:
-            log.exception("translation failed; using English")
-            return text
-        return out or text
+        system = (f"Translate the user's text into {style}. Keep markdown structure, URLs, "
+                  "numbers, currency amounts, place names, hotel and restaurant names exactly "
+                  "as written. Output only the translation.")
+
+        def one(chunk: str) -> str:
+            try:
+                out = self.llm.complete(self.small, [{"role": "system", "content": system},
+                                                     {"role": "user", "content": chunk}],
+                                        max_tokens=1500 if len(chunk) < 2500 else 3000)
+            except Exception:
+                log.exception("translation failed; keeping English for this part")
+                return chunk
+            return out or chunk
+
+        sections = [split_lines(sec) for sec in split_sections(text)]
+        pieces = [p for sec in sections for p in sec]
+        if len(pieces) == 1:
+            return one(text)
+        with ThreadPoolExecutor(max_workers=min(12, len(pieces))) as pool:
+            done = iter(list(pool.map(in_context(one), pieces)))
+        return "\n\n".join("\n".join(next(done) for _ in sec) for sec in sections)
 
     # ---------------- intake ----------------
     def _extract(self, state: TripState) -> TripState:
@@ -238,7 +293,8 @@ class TripPlanner:
                     **(state.get("request") or {})}
         res = self.llm.json(self.small, [
             {"role": "system", "content": EXTRACT_SYSTEM},
-            {"role": "user", "content": state["user_text"]}], default={})
+            {"role": "user", "content": f"TODAY: {_today():%Y-%m-%d (%A)}\n"
+                                        f"MESSAGE: {state['user_text']}"}], default={})
         merged = dict(existing)
         for key, val in res.items():
             if val not in (None, "", []):
@@ -250,6 +306,10 @@ class TripPlanner:
                 merged[key] = None
         if merged.get("month") and not 1 <= merged["month"] <= 12:
             merged["month"] = None
+        start = valid_start(merged.get("start_date"), _today()) if merged.get("start_date") else None
+        merged["start_date"] = start.isoformat() if start else None
+        if start:
+            merged["month"] = start.month  # the date decides the season
         if merged.get("days") is not None and not 1 <= merged["days"] <= 14:
             merged["days"] = None
         if merged.get("people") is not None and not 1 <= merged["people"] <= 20:
@@ -278,7 +338,11 @@ class TripPlanner:
             "relaxed", "balanced", "packed") else ""
         merged["vulnerable_travellers"] = bool(merged.get("vulnerable_travellers"))
         missing = [k for k in REQUIRED if not merged.get(k)]
-        return {"request": merged, "missing": missing}
+        said = [*(state.get("said") or []), state["user_text"]]
+        memories = state.get("memories")
+        if memories is None:  # recall once per trip
+            memories = self.memory.recall(state.get("owner", "")) if self.memory else []
+        return {"request": merged, "missing": missing, "said": said, "memories": memories}
 
     def _route_after_extract(self, state: TripState) -> str:
         if state["missing"] and state.get("asks", 0) < MAX_ASKS:
@@ -307,6 +371,14 @@ class TripPlanner:
         combos = [c for c, min_days in CIRCUITS
                   if days >= min_days and not NOT_READY.intersection(c)]
         combos += [[d] for d in DESTINATIONS if d not in NOT_READY]
+        # The traveller named a set of towns no ready-made circuit covers (e.g. Ranikhet and
+        # Almora): offer exactly those, in a sensible travel order, if there is a day for each.
+        named = [d for d in req.get("places") or [] if d not in NOT_READY]
+        if (len(named) >= 2 and days >= len(named)
+                and not any(set(c) == set(named) for c in combos)):
+            combos.append(_route_order(named))
+        visited = {t for m in state.get("memories") or [] if m.get("kind") == "trip"
+                   for t in m.get("towns") or []}
         for combo in combos:
             reasons, score = [], 0
             for d in combo:
@@ -319,8 +391,12 @@ class TripPlanner:
             if len(combo) > 1 and days >= 3:
                 score += 1
             label = " + ".join(DESTINATIONS[d]["name"] for d in combo)
+            seen = [d for d in combo if d in visited]
+            if seen and not set(seen) & set(req.get("places") or []):
+                score -= len(seen)  # gently prefer somewhere new, unless they asked for it
             scored.append({"id": "+".join(combo), "label": label, "destinations": combo,
-                           "reasons": reasons, "score": score})
+                           "reasons": reasons, "score": score,
+                           "visited": [DESTINATIONS[d]["name"] for d in seen]})
         # Towns the traveller named come first: most named towns covered, then fewest towns
         # they did not ask for, then season and interest fit.
         wanted = [d for d in req.get("places") or [] if d not in NOT_READY]
@@ -338,7 +414,8 @@ class TripPlanner:
     def _choose(self, state: TripState) -> TripState:
         picked = interrupt({"type": "choose",
                             "message": state.get("choose_msg") or "Which circuit would you like?",
-                            "options": [{k: o[k] for k in ("id", "label", "reasons")}
+                            "options": [{k: o.get(k) for k in ("id", "label", "reasons",
+                                                               "visited")}
                                         for o in state["options"]]})
         match = next((o for o in state["options"] if o["id"] == picked), state["options"][0])
         return {"destinations": match["destinations"]}
@@ -353,13 +430,18 @@ class TripPlanner:
 
         def search(task):  # independent network calls: run them in parallel
             dest, (key, types, query, k) = task
+            # strict: a search that keeps failing raises, instead of looking like "no results"
             hits = self.retriever.search(query, top_k=k, filter={
-                "city": DESTINATIONS[dest]["name"], "type": {"$in": types}})
+                "city": DESTINATIONS[dest]["name"], "type": {"$in": types}},
+                strict=True, attempts=3)
             return dest, key, [h["id"] for h in hits]
 
         tasks = [(d, spec) for d in state["destinations"] for spec in specs]
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            found = list(pool.map(search, tasks))
+        try:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                found = list(pool.map(in_context(search), tasks))
+        except RetrievalError as exc:
+            raise PlanningUnavailable(UNAVAILABLE_MSG) from exc
         candidates, entities = {}, {}
         for dest in state["destinations"]:
             pools = {key: ids for d, key, ids in found if d == dest}
@@ -372,6 +454,11 @@ class TripPlanner:
                 "stops": [ents[i] for i in pools["stops"] if i in ents][:8],
                 "meals": [ents[i] for i in pools["meals"] if i in ents][:6],
                 "stays": stays[:6]}
+            # Every offered town has places and stays in the data, so finding neither means a
+            # store failed. Never hand the traveller an empty plan.
+            if not candidates[dest]["stops"] and not candidates[dest]["stays"]:
+                log.error("research found nothing for %s; treating as an outage", dest)
+                raise PlanningUnavailable(UNAVAILABLE_MSG)
         return {"candidates": candidates, "entities": entities}
 
     # ---------------- supervisor: specialist agents ----------------
@@ -391,6 +478,9 @@ class TripPlanner:
         def food():
             out, notes = {}, []
             for dest, pools in state["candidates"].items():
+                if "food" in self.ablate:  # ablation: no diet filter
+                    out[dest] = pools["meals"]
+                    continue
                 kept, note = FoodAgent.filter(req, pools["meals"], diet)
                 out[dest] = kept
                 notes += [f"{DESTINATIONS[dest]['name']}: {note}"] if note else []
@@ -400,8 +490,9 @@ class TripPlanner:
             return TransportAgent(self.tools).brief(req, state["destinations"])
 
         with ThreadPoolExecutor(max_workers=3) as pool:
-            f_stays, f_food, f_transport = (pool.submit(stays), pool.submit(food),
-                                            pool.submit(transport))
+            f_stays, f_food, f_transport = (pool.submit(in_context(stays)),
+                                            pool.submit(in_context(food)),
+                                            pool.submit(in_context(transport)))
             (ranked, n1), (kept, n2), brief = f_stays.result(), f_food.result(), f_transport.result()
         candidates = {d: {**p, "stays": ranked[d], "meals": kept[d]}
                       for d, p in state["candidates"].items()}
@@ -430,6 +521,10 @@ class TripPlanner:
                 f"tier {req['tier']}, interests {req.get('interests') or 'none'}.\n"
                 f"Destinations in order: {state['destinations']}\n\nCANDIDATES "
                 "(use the short codes like A1, M2, S3 as ids):\n" + "\n".join(lines))
+        prefs = [m["text"] for m in state.get("memories") or [] if m.get("kind") == "preference"]
+        if prefs:
+            user += ("\nRemembered about this traveller from earlier trips (follow these unless "
+                     "this request says otherwise): " + "; ".join(prefs[:10]) + ".")
         pace = req.get("pace")
         if pace == "relaxed":
             user += "\nPace: relaxed. Use at most 2 stops per day."
@@ -456,6 +551,8 @@ class TripPlanner:
         errors, warnings = validate_plan(
             state["plan"], state["entities"], req, self._season, centres,
             self._transfer)
+        if "critic" in self.ablate:  # ablation: the draft goes through unchecked
+            return {"errors": [], "warnings": warnings, "feedback": ""}
         update: TripState = {"errors": errors, "warnings": warnings,
                              "feedback": "; ".join(errors)}
         if errors and state["plan_attempts"] >= MAX_PLAN_ATTEMPTS:
@@ -478,6 +575,50 @@ class TripPlanner:
         res = SafetyAgent(self.tools).review(state["plan"], state["entities"], state["request"])
         warnings = list(dict.fromkeys([*state["warnings"], *res["warnings"]]))
         return {"safety": res, "warnings": warnings}
+
+    # ---------------- weather agent ----------------
+    def _weather(self, state: TripState) -> TripState:
+        """With a start date: weather for every day in its town (a real forecast within 16
+        days, otherwise last year's same dates, clearly labelled). Heavy forecast rain adds a
+        warning that suggests re-planning from that day."""
+        req, plan = state["request"], state["plan"]
+        if not req.get("start_date"):
+            return {"weather": {}}
+        start = date.fromisoformat(req["start_date"])
+        blocks: list[list] = []  # [destination, first day, last day]
+        for d in plan["days"]:
+            if blocks and blocks[-1][0] == d["destination"] and blocks[-1][2] == d["day"] - 1:
+                blocks[-1][2] = d["day"]
+            else:
+                blocks.append([d["destination"], d["day"], d["day"]])
+        days, kinds = [], set()
+        for dest, a, b in blocks:
+            town = DESTINATIONS[dest]
+            try:
+                w = self.tools.call("get_weather", lat=town["lat"], lon=town["lon"],
+                                    start_date=(start + timedelta(days=a - 1)).isoformat(),
+                                    end_date=(start + timedelta(days=b - 1)).isoformat())
+            except ToolError as exc:
+                log.warning("get_weather failed for %s: %s", dest, exc)
+                continue
+            kinds.add(w.get("kind"))
+            for i, x in enumerate(w.get("days") or []):
+                days.append({**x, "day": a + i, "town": town["name"], "kind": w.get("kind")})
+        warnings = list(state["warnings"])
+        for x in days:
+            rain = x.get("rain_mm") or 0
+            if x["kind"] == "forecast" and rain >= HEAVY_RAIN_MM:
+                when = start + timedelta(days=x["day"] - 1)
+                warnings.append(f"Weather, day {x['day']} ({when:%a %d %b}, {x['town']}): heavy "
+                                f"rain forecast ({rain:.0f} mm). Hill roads can close; consider "
+                                f"re-planning from day {x['day']}.")
+        note = ""
+        if "typical" in kinds:
+            note = ("Your dates are beyond the 16-day forecast, so the weather shown is last "
+                    "year's for the same dates: a rough guide, not a forecast.")
+        return {"weather": {"days": days, "note": note,
+                            "kind": "forecast" if kinds == {"forecast"} else "typical"},
+                "warnings": list(dict.fromkeys(warnings))}
 
     # ---------------- cost ----------------
     @staticmethod
@@ -538,7 +679,8 @@ class TripPlanner:
         """Build (and translate) the review text once. LangGraph re-runs an interrupting node
         from the top when it resumes, so slow work must not live inside the approve node."""
         text = render_itinerary(state["plan"], state["entities"], state["cost"],
-                                state["warnings"], state["request"])
+                                state["warnings"], state["request"],
+                                weather=state.get("weather"))
         return {"preview": self._loc(state, text), "timeline": self._timeline(state),
                 "approve_msg": self._loc(state, "Approve this plan, or tell me what to change?")}
 
@@ -554,20 +696,99 @@ class TripPlanner:
     def _route_after_approve(self, state: TripState) -> str:
         action = state["decision"].get("action")
         if action == "approve":
-            return "finalize"
+            return "concierge" if self.concierge else "finalize"
         if action == "cancel" or state.get("edits", 0) >= MAX_EDITS:
             return "cancel"
         return "edit"
 
+    # ---------------- concierge (after approval) ----------------
+    def _concierge(self, state: TripState) -> TripState:
+        return {"hotel_findings": RESET, "travel": {}, "hotel_choice": {}}
+
+    def _dispatch_concierge(self, state: TripState) -> list[Send]:
+        """Fan out: one hotel agent per overnight town, plus the travel-info agent, all in
+        parallel (LangGraph runs every Send of a step concurrently)."""
+        req, plan = state["request"], state["plan"]
+        nights: dict[str, dict] = {}
+        for d in plan["days"]:
+            if d["day"] < req["days"]:
+                n = nights.setdefault(d["destination"], {"nights": 0, "current": d.get("stay")})
+                n["nights"] += 1
+        sends = []
+        for dest, info in nights.items():
+            town = DESTINATIONS[dest]
+            stays = ((state.get("candidates") or {}).get(dest) or {}).get("stays") or []
+            sends.append(Send("hotel_research", {
+                "dest": dest, "town": {k: town[k] for k in ("name", "lat", "lon")},
+                "stays": stays, "request": req, "current": info["current"],
+                "nights": info["nights"]}))
+        towns = [DESTINATIONS[d]["name"] for d in dict.fromkeys(x["destination"]
+                                                                for x in plan["days"])]
+        sends.append(Send("travel_info", {"towns": towns, "month": req.get("month")}))
+        return sends
+
+    def _hotel_research(self, payload: dict) -> TripState:
+        found = HotelAgent(self.tools, self.llm, self.small).research(
+            payload["dest"], payload["town"], payload["stays"], payload["request"],
+            payload["current"])
+        return {"hotel_findings": [{**found, "nights": payload["nights"]}]}
+
+    def _travel_info(self, payload: dict) -> TripState:
+        return {"travel": TravelInfoAgent(self.tools, self.llm, self.small).notes(
+            payload["towns"], payload["month"])}
+
+    def _rank_hotels(self, state: TripState) -> TripState:
+        order = list(dict.fromkeys(d["destination"] for d in state["plan"]["days"]))
+        towns = sorted(state.get("hotel_findings") or [],
+                       key=lambda t: order.index(t["dest"]) if t["dest"] in order else 99)
+        return {"concierge": {"towns": towns, "travel": state.get("travel") or {}},
+                "hotels_msg": self._loc(state, "Here is what guests say about the hotels. Pick "
+                                        "one for each town, or keep the ones in your plan.")}
+
+    def _choose_hotels(self, state: TripState) -> TripState:
+        towns = state["concierge"]["towns"]
+        if not any(len(t["options"]) > 1 or t["options"] and t["options"][0]["reviews"]
+                   for t in towns):
+            return {"hotel_choice": {}}  # nothing to show or choose
+        choice = interrupt({"type": "hotels", "message": state.get("hotels_msg"),
+                            "towns": towns, "travel": state["concierge"]["travel"]})
+        picks = choice.get("choices") if isinstance(choice, dict) else None
+        return {"hotel_choice": picks if isinstance(picks, dict) else {}}
+
+    def _apply_hotels(self, state: TripState) -> TripState:
+        """Swap in the chosen hotels (only ones that were offered), then re-price and
+        re-render the plan."""
+        offered = {t["dest"]: {o["stay_id"] for o in t["options"]}
+                   for t in state["concierge"]["towns"]}
+        plan, changed = deepcopy(state["plan"]), False
+        for d in plan["days"]:
+            pick = (state.get("hotel_choice") or {}).get(d["destination"])
+            if (d["day"] < state["request"]["days"] and pick in offered.get(d["destination"], ())
+                    and pick != d.get("stay")):
+                d["stay"], changed = pick, True
+        if not changed:
+            return {}
+        warnings = [w for w in state["warnings"] if not w.startswith("Estimated cost starts")]
+        new = {**state, "plan": plan, "warnings": warnings}
+        cost = self._cost(new)
+        new.update(cost)
+        new["warnings"] = list(dict.fromkeys(new["warnings"]))
+        return {"plan": plan, "cost": new["cost"], "warnings": new["warnings"],
+                **self._preview(new)}
+
     def _edit(self, state: TripState) -> TripState:
-        return {"feedback": f"Traveller asked: {state['decision'].get('text', '')}",
+        text = state["decision"].get("text", "")
+        return {"feedback": f"Traveller asked: {text}",
+                "said": [*(state.get("said") or []), text],
                 "plan_attempts": 0, "edits": state.get("edits", 0) + 1}
 
     def _cancel(self, state: TripState) -> TripState:
         return {"status": "cancelled"}
 
     def _timeline(self, state: TripState) -> dict:
-        return build_timeline(state["plan"], state["entities"], self._transfer)
+        return build_timeline(state["plan"], state["entities"], self._transfer,
+                              (state.get("request") or {}).get("start_date"),
+                              state.get("weather"))
 
     @staticmethod
     def _slim(ent: dict) -> dict:
@@ -580,7 +801,8 @@ class TripPlanner:
 
     def _finalize(self, state: TripState) -> TripState:
         plan, ents, req = state["plan"], state["entities"], state["request"]
-        english = render_itinerary(plan, ents, state["cost"], state["warnings"], req)
+        english = render_itinerary(plan, ents, state["cost"], state["warnings"], req,
+                                   weather=state.get("weather"))
         links = build_booking_links(req, plan, ents)
         used = {i for d in plan["days"] for i in
                 [*(d.get("stops") or []), *(d.get("meals") or []), d.get("stay")] if i}
@@ -603,8 +825,39 @@ class TripPlanner:
             "safety": state.get("safety", {}), "transport": state.get("transport", {}),
             "entities": {i: self._slim(ents[i]) for i in used if i in ents},
             "itinerary": text, "itinerary_en": english + "\n\n" + render_links(links),
-            "checklist": checklist}
+            "checklist": checklist, "concierge": self._concierge_summary(state, plan),
+            "weather": state.get("weather") or {}}
         return {"final": text, "structured": structured, "status": "done"}
+
+    def _remember(self, state: TripState) -> TripState:
+        """Memory agent, after approval only: lasting preferences from what the traveller
+        typed (each kept with its exact quote) and one episode for this trip."""
+        owner = state.get("owner", "")
+        if not self.memory or not owner:
+            return {"learned": []}
+        prefs, _ = extract_preferences(self.llm, self.small, state.get("said") or [])
+        learned = [m for p in prefs
+                   if (m := self.memory.remember(owner, "preference", p["text"], p["quote"]))]
+        edits = [s for s in (state.get("said") or [])[1:] if s]
+        towns = list(dict.fromkeys(d["destination"] for d in state["plan"]["days"]))
+        self.memory.remember(owner, "trip", trip_episode(state["request"], state["plan"], edits),
+                             extra={"towns": towns, "month": state["request"].get("month")})
+        return {"learned": learned}
+
+    @staticmethod
+    def _concierge_summary(state: TripState, plan: dict) -> dict:
+        """What the saved trip keeps from the Concierge: per town the chosen hotel and the
+        researched options (reviews trimmed), plus verified travel notes."""
+        con = state.get("concierge") or {}
+        if not con:
+            return {}
+        stays = {d["destination"]: d.get("stay") for d in plan["days"] if d.get("stay")}
+        towns = []
+        for t in con.get("towns", []):
+            towns.append({"dest": t["dest"], "town": t["town"], "chosen": stays.get(t["dest"]),
+                          "options": [{**o, "reviews": o["reviews"][:3]} for o in t["options"]],
+                          "claims": t["claims"], "verified": t["verified"]})
+        return {"towns": towns, "travel": con.get("travel") or {}}
 
     # ---------------- wiring ----------------
     def _build(self, checkpointer):
@@ -615,7 +868,12 @@ class TripPlanner:
                          ("plan", self._plan), ("safety", self._safety),
                          ("critic", self._critic), ("cost", self._cost),
                          ("preview", self._preview), ("approve", self._approve), ("edit", self._edit),
-                         ("cancel", self._cancel), ("finalize", self._finalize)):
+                         ("cancel", self._cancel), ("finalize", self._finalize),
+                         ("concierge", self._concierge), ("hotel_research", self._hotel_research),
+                         ("travel_info", self._travel_info), ("rank_hotels", self._rank_hotels),
+                         ("choose_hotels", self._choose_hotels),
+                         ("apply_hotels", self._apply_hotels), ("remember", self._remember),
+                         ("weather", self._weather)):
             g.add_node(name, fn)
         g.add_edge(START, "extract")
         g.add_conditional_edges("extract", self._route_after_extract,
@@ -628,13 +886,23 @@ class TripPlanner:
         g.add_edge("plan", "critic")
         g.add_conditional_edges("critic", self._route_after_critic,
                                 {"plan": "plan", "safety": "safety"})
-        g.add_edge("safety", "cost")
+        g.add_edge("safety", "weather")
+        g.add_edge("weather", "cost")
         g.add_edge("cost", "preview")
         g.add_edge("preview", "approve")
         g.add_conditional_edges("approve", self._route_after_approve,
-                                {"finalize": "finalize", "edit": "edit", "cancel": "cancel"})
+                                {"finalize": "finalize", "edit": "edit", "cancel": "cancel",
+                                 "concierge": "concierge"})
+        g.add_conditional_edges("concierge", self._dispatch_concierge,
+                                ["hotel_research", "travel_info"])
+        g.add_edge("hotel_research", "rank_hotels")
+        g.add_edge("travel_info", "rank_hotels")
+        g.add_edge("rank_hotels", "choose_hotels")
+        g.add_edge("choose_hotels", "apply_hotels")
+        g.add_edge("apply_hotels", "finalize")
         g.add_edge("edit", "plan")
-        g.add_edge("finalize", END)
+        g.add_edge("finalize", "remember")
+        g.add_edge("remember", END)
         g.add_edge("cancel", END)
         return g.compile(checkpointer=checkpointer)
 
@@ -665,7 +933,8 @@ class TripPlanner:
             "feedback": f"The traveller needs a change from day {from_day} on: {reason}",
             "plan_attempts": 0, "edits": 0, "status": "running",
             "locked_days": [d for d in vals["plan"]["days"] if d["day"] < from_day],
-            "replan_from": from_day}, as_node="edit")
+            "replan_from": from_day, "said": [*(vals.get("said") or []), reason]},
+            as_node="edit")
         return self._run(None, thread_id, on_event)
 
     def owner(self, thread_id: str) -> str | None:
@@ -677,6 +946,12 @@ class TripPlanner:
         return self._run(Command(resume=value), thread_id, on_event)
 
     def _run(self, inp: Any, thread_id: str, on_event: OnEvent) -> dict[str, Any]:
+        with metered(Meter()) as meter:  # tokens and cost of this run, across every agent
+            result = self._run_inner(inp, thread_id, on_event)
+        result["usage"] = meter.summary()
+        return result
+
+    def _run_inner(self, inp: Any, thread_id: str, on_event: OnEvent) -> dict[str, Any]:
         cfg = self._cfg(thread_id)
         if on_event is None:
             return self._result(self.graph.invoke(inp, cfg), thread_id)

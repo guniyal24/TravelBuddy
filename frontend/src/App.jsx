@@ -6,6 +6,7 @@ import Icon from "./components/Icon.jsx";
 import Landing from "./components/Landing.jsx";
 import Logo from "./components/Logo.jsx";
 import MyTrips from "./components/MyTrips.jsx";
+import Memories from "./components/Memories.jsx";
 import Profile from "./components/Profile.jsx";
 import ServerStatus from "./components/ServerStatus.jsx";
 import Trip from "./components/Trip.jsx";
@@ -117,7 +118,10 @@ export default function App() {
                    onOpen={(t) => { setOpenTrip(t); go("trip"); }} onPlan={() => go("trip")} />
         </div>
         <div hidden={tab !== "chat"}><Chat onExpired={onExpired} /></div>
-        <div hidden={tab !== "profile"}><Profile onExpired={onExpired} /></div>
+        <div hidden={tab !== "profile"}>
+          <Profile onExpired={onExpired} />
+          <Memories onExpired={onExpired} active={tab === "profile"} />
+        </div>
       </main>
 
       <footer className="appfoot container">

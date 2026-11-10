@@ -33,7 +33,16 @@ class Settings(BaseSettings):
     chat_model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
     # reasoning/planner: fast Mistral-Small; judge: pinned 70B so eval scores stay comparable
     reasoning_model: str = "mistralai/Mistral-Small-3.2-24B-Instruct-2506"
+    # Concierge stage after approval: Google reviews per hotel (needs GOOGLE_PLACES_API_KEY)
+    # and web travel notes (needs TAVILY_API_KEY). Either part is skipped without its key.
+    concierge_enabled: bool = True
     judge_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    # Eval jury (judge v2): three model families, none from the generator's (Mistral) family,
+    # so no judge grades its own family's writing. Pinned so scores stay comparable over time.
+    judge_jury: str = ("meta-llama/Llama-3.3-70B-Instruct-Turbo,Qwen/Qwen2.5-72B-Instruct,"
+                       "google/gemma-3-27b-it")
+    judge_samples: int = 3  # verdicts sampled per juror (majority vote)
+    judge_temperature: float = 0.7  # sampling temperature for those verdicts
     planner_model: str = "mistralai/Mistral-Small-3.2-24B-Instruct-2506"
 
     # Redis (cache + rate limit)
@@ -43,7 +52,7 @@ class Settings(BaseSettings):
     # Guest mode: try the app without an account. Guests get a stricter limit and a token that
     # expires; new guest sessions are limited per IP so the LLM bill stays bounded.
     guest_enabled: bool = True
-    guest_rate_limit_per_minute: int = 5
+    guest_rate_limit_per_minute: int = 10  # one trip with the Concierge is ~4 calls
     guest_token_expire_minutes: int = 24 * 60
     guest_sessions_per_ip_per_hour: int = 10
     guest_sessions_per_day: int = 300  # global cap: holds even if a client spoofs its IP
@@ -51,6 +60,9 @@ class Settings(BaseSettings):
     # survive redeploys; the two SQLite paths below are then unused.
     database_url: str = ""
     checkpoint_path: str = "data/checkpoints.sqlite"  # durable trip state
+    # Long-term agent memory (preferences and past trips); in DATABASE_URL when that is set.
+    memory_enabled: bool = True
+    memory_path: str = "data/memory.sqlite"
     trips_path: str = "data/trips.sqlite"  # saved trips, profiles, checklist state
     mcp_transport: str = "memory"  # "memory" (in-process MCP) or "stdio" (subprocess server)
     rag_mode: str = "self"  # "self" (Self-RAG graph) or "hybrid" (prototype pipeline)

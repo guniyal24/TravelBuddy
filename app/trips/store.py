@@ -25,6 +25,12 @@ SCHEMA = [
     """CREATE TABLE IF NOT EXISTS checks (
       trip_id TEXT NOT NULL, item_id TEXT NOT NULL, done INTEGER NOT NULL,
       PRIMARY KEY (trip_id, item_id))""",
+    # one row per planner run (start, each resume, re-plan): what that step cost
+    """CREATE TABLE IF NOT EXISTS trip_usage (
+      trip_id TEXT NOT NULL, step TEXT NOT NULL, at TEXT NOT NULL, llm_calls INTEGER NOT NULL,
+      tokens_in INTEGER NOT NULL, tokens_out INTEGER NOT NULL, cost_usd REAL NOT NULL,
+      seconds REAL NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS trip_usage_trip ON trip_usage(trip_id)",
 ]
 
 PROFILE_FIELDS = {"tier": str, "diet": str, "language": str, "origin": str,
@@ -91,9 +97,12 @@ class _Postgres:
         return sql.replace("?", "%s")  # our SQL never contains a literal '?'
 
     def query(self, sql: str, params: tuple = ()) -> list[tuple]:
-        with self._pool.connection() as conn:
-            rows = conn.execute(self._sql(sql), params).fetchall()
-        return [tuple(r.values()) for r in rows]  # the pool hands out dict rows
+        # The pool hands out dict rows, which merge columns that share a name (COUNT(*),
+        # SUM(a), SUM(b) are all "sum"/"count"); positional tuples keep every column.
+        from psycopg.rows import tuple_row
+
+        with self._pool.connection() as conn, conn.cursor(row_factory=tuple_row) as cur:
+            return cur.execute(self._sql(sql), params).fetchall()
 
     def run(self, *statements: tuple[str, tuple]) -> None:
         with self._pool.connection() as conn, conn.transaction():
@@ -178,6 +187,46 @@ class TripStore:
             "ORDER BY updated_at DESC LIMIT 50", (owner,))
         return [{"trip_id": r[0], "title": r[1], "created_at": r[2], "updated_at": r[3]}
                 for r in rows]
+
+    # ---- usage (cost and latency) ----
+    def record_usage(self, trip_id: str, step: str, u: dict) -> None:
+        self._db.run(("INSERT INTO trip_usage (trip_id, step, at, llm_calls, tokens_in, "
+                      "tokens_out, cost_usd, seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                      (trip_id, step[:20], _now(), int(u.get("llm_calls", 0)),
+                       int(u.get("tokens_in", 0)), int(u.get("tokens_out", 0)),
+                       float(u.get("cost_usd", 0.0)), float(u.get("seconds", 0.0)))))
+
+    def trip_usage(self, trip_id: str) -> dict:
+        rows = self._db.query(
+            "SELECT COUNT(*), COALESCE(SUM(llm_calls), 0), COALESCE(SUM(tokens_in), 0), "
+            "COALESCE(SUM(tokens_out), 0), COALESCE(SUM(cost_usd), 0), COALESCE(SUM(seconds), 0) "
+            "FROM trip_usage WHERE trip_id=?", (trip_id,))
+        n, calls, tin, tout, usd, secs = rows[0]
+        return {"runs": n, "llm_calls": int(calls), "tokens_in": int(tin),
+                "tokens_out": int(tout), "cost_usd": round(float(usd), 5),
+                "seconds": round(float(secs), 1)}
+
+    def usage_stats(self) -> dict:
+        """Cost and agent time per completed trip (only trips that were approved and saved),
+        as medians and 90th percentiles. Time is the agents' working time, not the minutes a
+        traveller spends deciding."""
+        rows = self._db.query(
+            "SELECT u.trip_id, SUM(u.llm_calls), SUM(u.cost_usd), SUM(u.seconds) "
+            "FROM trip_usage u JOIN trips t ON t.trip_id = u.trip_id GROUP BY u.trip_id", ())
+        if not rows:
+            return {"trips": 0}
+
+        def pct(values: list[float], q: float) -> float:
+            v = sorted(values)
+            return v[min(len(v) - 1, int(round(q * (len(v) - 1))))]
+
+        calls = [float(r[1]) for r in rows]
+        usd = [float(r[2]) for r in rows]
+        secs = [float(r[3]) for r in rows]
+        return {"trips": len(rows),
+                "llm_calls": {"p50": pct(calls, 0.5), "p90": pct(calls, 0.9)},
+                "cost_usd": {"p50": round(pct(usd, 0.5), 5), "p90": round(pct(usd, 0.9), 5)},
+                "seconds": {"p50": round(pct(secs, 0.5), 1), "p90": round(pct(secs, 0.9), 1)}}
 
     def set_check(self, trip_id: str, item_id: str, done: bool) -> bool:
         """Tick or untick a checklist item; False if the trip has no such item."""

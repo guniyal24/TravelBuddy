@@ -14,15 +14,11 @@ plan after the Critic accepts it.
 import re
 
 from app.cost.pricing import parse_price_range
+from app.towns import ACCESS_NOTES, ELEVATION_M
 from mcp_server.client import ToolError
 
 # Approximate town elevations (m), used only when a stay has no measured elevation.
-APPROX_ELEVATION_M = {
-    "destination_haridwar": 250, "destination_rishikesh": 340, "destination_dehradun": 640,
-    "destination_jim_corbett": 400, "destination_mussoorie": 2000, "destination_nainital": 2000,
-    "destination_almora": 1650, "destination_ranikhet": 1830, "destination_auli": 2800,
-    "destination_badrinath": 3300, "destination_kedarnath": 3580,
-}
+APPROX_ELEVATION_M = ELEVATION_M  # from the town registry
 HIGH_TOWN_M = 2500
 # Whole-word matches only, so "Barista" or "Fishtail Cafe" style names do not trip "bar"/"fish".
 # Bars and pubs count too: a vegetarian traveller asking for veg food rarely wants one.
@@ -134,6 +130,10 @@ class SafetyAgent:
             warnings.append(f"Health: {names} is above {HIGH_TOWN_M} m. With children, elderly "
                             "travellers or heart/lung conditions, see a doctor first and carry "
                             "regular medicines.")
+        for dest in dict.fromkeys(d["destination"] for d in plan["days"]):
+            if note := ACCESS_NOTES.get(dest):  # trek-only towns: never let this be missed
+                name = dest.removeprefix("destination_").replace("_", " ").title()
+                warnings.append(f"Access, {name}: {note}")
         advisories = []
         for dest in dict.fromkeys(d["destination"] for d in plan["days"]):
             try:

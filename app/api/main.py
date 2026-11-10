@@ -8,17 +8,19 @@ import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date
+from typing import Literal
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.api import security
 from app.api.ratelimit import RateLimiter, RateLimitExceeded, connect_redis
 from app.config import Settings, get_settings
+from app.graph.trip_graph import PlanningUnavailable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger(__name__)
@@ -29,9 +31,14 @@ KEEPALIVE_SECONDS = 15  # comment lines keep proxies from closing a quiet event 
 
 
 # --- schemas ---
+# Size limits on everything a client sends: they bound LLM cost and stop oversized payloads
+# (an abuse vector) before any work is done. Oversized requests get a 422.
+MAX_MESSAGE = 1500
+
+
 class UserRegister(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=6, max_length=128)
 
 
 class Token(BaseModel):
@@ -40,34 +47,47 @@ class Token(BaseModel):
     guest: bool = False
 
 
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+
+
 class ChatRequest(BaseModel):
-    query: str
-    history: list[dict] = []
+    query: str = Field(min_length=1, max_length=1000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=20)
 
 
 class TripStart(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=MAX_MESSAGE)
 
 
 class TripResume(BaseModel):
-    value: str | dict  # ask: text; choose: option id; approve: {"action": ..., "text"?: ...}
+    # ask: text; choose: option id; approve: {"action": ..., "text"?: ...}; hotels: {"choices"}
+    value: str | dict
+
+    @field_validator("value")
+    @classmethod
+    def bounded(cls, v):
+        if len(v if isinstance(v, str) else json.dumps(v)) > MAX_MESSAGE * 2:
+            raise ValueError("value is too long")
+        return v
 
 
 class TripReplan(BaseModel):
-    from_day: int
-    reason: str
+    from_day: int = Field(ge=1, le=14)
+    reason: str = Field(max_length=500)
 
 
 class ChecklistUpdate(BaseModel):
-    item_id: str
+    item_id: str = Field(max_length=64)
     done: bool
 
 
 class FeedbackRequest(BaseModel):
-    session_id: str
-    query: str
-    rating: int
-    comment: str | None = None
+    session_id: str = Field(max_length=64)
+    query: str = Field(max_length=1000)
+    rating: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=1000)
 
 
 # --- lifespan ---
@@ -89,7 +109,12 @@ async def lifespan(app: FastAPI):
             app.state.rag = HybridRAG(s, app.state.store, redis_client)
         else:
             app.state.rag = build_self_rag(s, app.state.store, redis_client)
-        app.state.planner = build_trip_planner(s, app.state.store, redis_client)
+        if s.memory_enabled:
+            from app.memory import TravelMemory
+
+            app.state.memory = TravelMemory.open(s.database_url or s.memory_path)
+        app.state.planner = build_trip_planner(s, app.state.store, redis_client,
+                                               getattr(app.state, "memory", None))
     if not hasattr(app.state, "trips"):
         from app.trips.store import TripStore
 
@@ -110,6 +135,9 @@ async def lifespan(app: FastAPI):
     trips = getattr(app.state, "trips", None)
     if trips is not None and hasattr(trips, "close"):
         trips.close()
+    memory = getattr(app.state, "memory", None)
+    if memory is not None:
+        memory.close()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -124,6 +152,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(PlanningUnavailable)
+    async def planning_unavailable(request: Request, exc: PlanningUnavailable):
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     # --- dependencies ---
     async def current_user(request: Request, token: str = Depends(oauth2_scheme)) -> dict:
@@ -162,6 +194,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     async def health():
         return {"status": "ok"}
+
+    @app.get("/api/stats")
+    async def stats(request: Request):
+        """Public, aggregate only: cost and agent time per completed trip."""
+        from app.usage import USD_TO_INR
+
+        s = request.app.state.trips.usage_stats()
+        if s.get("trips"):
+            s["cost_inr"] = {k: round(v * USD_TO_INR, 2) for k, v in s["cost_usd"].items()}
+        return s
 
     @app.post("/api/register")
     async def register(body: UserRegister, request: Request):
@@ -225,13 +267,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         log.info("chat user=%s session=%s", user["email"], session_id)
         rag = request.app.state.rag
         return StreamingResponse(
-            rag.get_answer(body.query, session_id, body.history),
+            rag.get_answer(body.query, session_id, [t.model_dump() for t in body.history]),
             media_type="text/event-stream",
             headers={"X-Session-ID": session_id},
         )
 
     def _trip_response(request: Request, trip_id: str, result: dict, owner: str) -> dict:
         out = {"trip_id": trip_id, "status": result["status"]}
+        if result.get("usage"):  # what this step cost; saved per trip for the stats
+            step = (result.get("prompt") or {}).get("type") or result["status"]
+            request.app.state.trips.record_usage(trip_id, step, result["usage"])
+            out["usage"] = request.app.state.trips.trip_usage(trip_id)
         if result["status"] == "waiting":
             out["prompt"] = result["prompt"]
             return out
@@ -258,7 +304,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 result = run(on_event=lambda ev: events.put({"type": "progress", **ev}))
                 events.put({"type": "result", **_trip_response(request, trip_id, result, owner)})
-            except ValueError as exc:
+            except (ValueError, PlanningUnavailable) as exc:  # messages safe to show
                 events.put({"type": "error", "detail": str(exc)})
             except Exception:
                 log.exception("trip run failed trip=%s", trip_id)
@@ -377,13 +423,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Content-Disposition": 'attachment; filename="uttarakhand-trip.pdf"'})
         if format == "ics":
             try:
-                first_day = date.fromisoformat(start or "")
+                first_day = date.fromisoformat(
+                    start or (trip.get("request") or {}).get("start_date") or "")
             except ValueError:
                 raise HTTPException(status_code=400,
                                     detail="Give the first day as start=YYYY-MM-DD.") from None
             return Response(build_ics(trip, first_day), media_type="text/calendar", headers={
                 "Content-Disposition": 'attachment; filename="uttarakhand-trip.ics"'})
         raise HTTPException(status_code=400, detail="format must be txt, pdf or ics")
+
+    # --- long-term memory: the traveller can see and delete everything remembered ---
+    def _memory(request: Request):
+        memory = getattr(request.app.state, "memory", None)
+        if memory is None:
+            raise HTTPException(status_code=404, detail="Memory is turned off.")
+        return memory
+
+    @app.get("/api/memories")
+    async def list_memories(request: Request, user: dict = Depends(current_user)):
+        return _memory(request).recall(user["email"])
+
+    @app.delete("/api/memories/{key}")
+    async def forget_memory(key: str, request: Request, user: dict = Depends(current_user)):
+        if not _memory(request).forget(user["email"], key):
+            raise HTTPException(status_code=404, detail="No such memory")
+        return {"forgotten": key}
+
+    @app.delete("/api/memories")
+    async def forget_all(request: Request, user: dict = Depends(current_user)):
+        return {"forgotten": _memory(request).forget_all(user["email"])}
 
     @app.post("/api/feedback")
     async def feedback(

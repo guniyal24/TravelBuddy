@@ -11,7 +11,17 @@ export default function Timeline({ timeline }) {
         <section key={d.day} className="tl-day">
           <header>
             <span className="daybadge"><small>Day</small>{d.day}</span>
-            <h3>{d.label}</h3>
+            <div>
+              <h3>{d.label}</h3>
+              {d.date && <span className="muted small">{new Date(d.date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}</span>}
+            </div>
+            {d.weather?.max_c != null && (
+              <span className={`wx ${d.weather.kind === "forecast" && d.weather.rain_mm >= 30 ? "wet" : ""}`}
+                    title={d.weather.kind === "forecast" ? "Forecast (Open-Meteo)" : "Typical for these dates, not a forecast"}>
+                <Icon name="sun" size={14} /> {Math.round(d.weather.min_c)}–{Math.round(d.weather.max_c)}°C · {Math.round(d.weather.rain_mm || 0)} mm
+                {d.weather.kind !== "forecast" && <em> typical</em>}
+              </span>
+            )}
           </header>
           <ol>
             {d.items.map((it, i) => (

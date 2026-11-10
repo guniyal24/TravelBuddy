@@ -25,7 +25,8 @@ export default function Chat({ onExpired }) {
 
   async function send(q) {
     if (!q.trim() || busy) return;
-    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    // the API accepts the last 20 turns of up to 4000 characters each
+    const history = messages.slice(-20).map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
     setMessages((m) => [...m, { role: "user", content: q }, { role: "assistant", content: "" }]);
     setInput(""); setError(""); setBusy(true); setStatus("");
     let buf = ""; // chunks may split a status marker, so parse from a buffer
@@ -87,7 +88,7 @@ export default function Chat({ onExpired }) {
       </div>
       {error && <div className="error" role="alert"><Icon name="alert" size={18} /> {error}</div>}
       <form className="composer" onSubmit={(e) => { e.preventDefault(); send(input); }}>
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask a question..." aria-label="Your question" />
+        <input value={input} maxLength={1000} onChange={(e) => setInput(e.target.value)} placeholder="Ask a question..." aria-label="Your question" />
         <button className="primary" disabled={busy || !input.trim()} aria-label="Send"><Icon name="arrow" size={18} /></button>
       </form>
     </section>

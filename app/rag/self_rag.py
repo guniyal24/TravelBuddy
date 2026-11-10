@@ -28,14 +28,14 @@ MAX_CONTEXT_DOCS = 6
 
 ABSTAIN_MESSAGE_HI = (
     "मुझे इसकी भरोसेमंद जानकारी अपने उत्तराखंड डेटा में नहीं मिली, इसलिए मैं अंदाज़ा नहीं लगाऊँगा। "
-    "मेरा डेटा हरिद्वार, ऋषिकेश, देहरादून, मसूरी, नैनीताल, अल्मोड़ा, रानीखेत, जिम कॉर्बेट और बद्रीनाथ "
-    "(घूमने की जगहें, ठहरने, खाने और गतिविधियों) को कवर करता है।"
+    "मेरा डेटा गढ़वाल और कुमाऊँ के 26 शहरों (जैसे हरिद्वार, ऋषिकेश, मसूरी, नैनीताल, केदारनाथ और "
+    "कौसानी) की घूमने की जगहों, ठहरने, खाने और गतिविधियों को कवर करता है।"
 )
 ABSTAIN_MESSAGE = (
     "I couldn't find reliable information about that in my Uttarakhand data. "
-    "My data covers Haridwar, Rishikesh, Dehradun, Mussoorie, Nainital, Almora, Ranikhet, "
-    "Jim Corbett and Badrinath (places to see, stays, food and activities), so I'd rather "
-    "not guess."
+    "My data covers 26 towns across Garhwal and Kumaon (Haridwar, Rishikesh, Mussoorie, "
+    "Nainital, Kedarnath, Kausani and more: places to see, stays, food and activities), so I'd "
+    "rather not guess."
 )
 
 GRADER_SYSTEM = (

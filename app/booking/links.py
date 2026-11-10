@@ -3,6 +3,7 @@ sites; this module never handles payment or passenger details and does not claim
 fares, availability or bus timings (none are available from a free, permitted source)."""
 from urllib.parse import quote_plus
 
+from app.towns import KUMAON, STATIONS
 from app.transport.routes import transport_options
 
 # Origin city -> IATA code (major metros only; others fall back to a plain search link).
@@ -11,20 +12,7 @@ IATA = {"delhi": "DEL", "new delhi": "DEL", "mumbai": "BOM", "bengaluru": "BLR",
         "pune": "PNQ", "ahmedabad": "AMD", "jaipur": "JAI", "lucknow": "LKO"}
 JOLLY_GRANT = ("DED", "Dehradun (Jolly Grant) Airport")
 PANTNAGAR = ("PGH", "Pantnagar Airport")
-KUMAON = {"destination_nainital", "destination_almora", "destination_ranikhet",
-          "destination_jim_corbett"}
-# Station codes are curated and still unverified (see data/curated/gateways.yaml).
-HARIDWAR = ("HW", "Haridwar Junction")
-KATHGODAM = ("KGM", "Kathgodam")
-STATIONS = {"destination_haridwar": HARIDWAR,
-            "destination_rishikesh": ("YNRK", "Yog Nagari Rishikesh"),
-            "destination_dehradun": ("DDN", "Dehradun"),
-            "destination_mussoorie": ("DDN", "Dehradun (for Mussoorie)"),
-            "destination_nainital": KATHGODAM, "destination_almora": KATHGODAM,
-            "destination_ranikhet": KATHGODAM,
-            "destination_jim_corbett": ("RMR", "Ramnagar (for Jim Corbett)"),
-            "destination_kedarnath": HARIDWAR, "destination_badrinath": HARIDWAR,
-            "destination_auli": HARIDWAR}
+# Stations and the Kumaon/Garhwal split come from the town registry (curated, unverified).
 
 
 def _airport(dest: str) -> tuple[str, str]:

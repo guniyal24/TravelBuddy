@@ -61,7 +61,7 @@ def test_weather_validates_range():
 def test_server_registers_all_tools_and_calls_one():
     names = {t.name for t in asyncio.run(server.list_tools())}
     assert names == {"estimate_budget", "check_season", "check_altitude_plan", "get_weather",
-                     "get_transport", "check_conditions"}
+                     "get_transport", "check_conditions", "place_reviews", "web_search"}
     res = asyncio.run(server.call_tool("check_season",
                                        {"place_id": "destination_haridwar", "month": 11}))
     assert "good" in str(res)

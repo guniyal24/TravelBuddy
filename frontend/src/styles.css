@@ -470,3 +470,45 @@ main > div[hidden] { display: none; }
   padding: 10px 16px; background: var(--warn-bg); color: var(--warn); font-weight: 700; font-size: 14.5px; text-align: left; }
 .server-status .mini-spin { flex: none; }
 @media print { .server-status { display: none !important; } }
+
+/* concierge: hotel research and choice */
+.town { margin: 18px 0 8px; }
+.town h3 { margin: 0 0 10px; }
+.hotels { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.hotel { border: 1.5px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); padding: 14px; display: flex; flex-direction: column; gap: 8px; cursor: pointer; min-width: 0; }
+.hotel:hover { border-color: var(--link); }
+.hotel.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.hotel-summary .hotel { cursor: default; }
+.hotel-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.hotel-head h4 { margin: 6px 0 2px; font-size: 16.5px; overflow-wrap: anywhere; }
+.hotel-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.hotel-tags .pill:not(.ok) { background: var(--soft); color: var(--brand); }
+.hotel p { margin: 0; overflow-wrap: anywhere; }
+.stars { display: inline-flex; align-items: center; gap: 4px; font-weight: 800; color: var(--accent-text); }
+.radio { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); flex: none; }
+.radio.on { border: 6px solid var(--accent); }
+.aspects { display: grid; gap: 4px; font-size: 13px; }
+.aspect { display: grid; grid-template-columns: 82px 1fr 26px; gap: 8px; align-items: center; }
+.aspect .bar { height: 6px; background: var(--soft); border-radius: 999px; overflow: hidden; }
+.aspect .bar i { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
+.quotes { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.quote { border-left: 3px solid var(--ok); padding: 2px 0 2px 10px; display: grid; gap: 2px; font-size: 14px; }
+.quote.con { border-left-color: var(--warn); }
+.quote q { color: var(--text); font-style: italic; overflow-wrap: anywhere; }
+.quote cite { font-style: normal; color: var(--muted); font-size: 12.5px; }
+.why { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: flex-start; }
+.travel-notes { padding-left: 18px; display: grid; gap: 6px; overflow-wrap: anywhere; }
+
+/* long-term memory panel */
+.memories h2 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.mem-list { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 8px; }
+.mem-list li { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface-2); overflow-wrap: anywhere; }
+.mem-list q { display: block; color: var(--muted); font-style: italic; font-size: 13.5px; margin-top: 2px; }
+.option .pill:not(.ok):not(.warn) { background: var(--soft); color: var(--brand); }
+
+/* weather on timeline days */
+.tl-day header { flex-wrap: wrap; }
+.wx { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--soft); color: var(--brand); white-space: nowrap; }
+.wx.wet { background: var(--warn-bg); color: var(--warn); }
+.wx em { font-weight: 600; opacity: .8; }
+.trace-usage { margin: 10px 0 0; padding-top: 8px; border-top: 1px dashed var(--border); color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }

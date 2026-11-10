@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { cacheTrip, replanTrip, resumeTrip, startTrip } from "../api.js";
 import { DESTINATIONS, MONTHS } from "../data.js";
 import AgentTrace, { mergeEvents } from "./AgentTrace.jsx";
+import { HotelPicker } from "./Hotels.jsx";
 import Icon from "./Icon.jsx";
 import Mountains from "./Mountains.jsx";
 import TripView from "./TripView.jsx";
 
-const STEPS = ["Describe", "Choose", "Review", "Book"];
-const STEP_OF = { ask: 0, choose: 1, approve: 2, done: 3 };
+const STEPS = ["Describe", "Choose", "Review", "Hotels", "Book"];
+const STEP_OF = { ask: 0, choose: 1, approve: 2, hotels: 3, done: 4 };
 
 const EXAMPLES = [
   ["Temples and food, 3 days", "I want a 3 day trip in November for 2 people from Pune, budget stay, love temples and local food"],
@@ -36,6 +37,7 @@ export default function Trip({ onExpired, initialTrip }) {
   const [fromDay, setFromDay] = useState(1);
   const [reason, setReason] = useState("");
   const [trace, setTrace] = useState([]); // every agent step of this planning session
+  const [usage, setUsage] = useState(null); // tokens and cost so far, from the server
   const [since, setSince] = useState(0);
 
   useEffect(() => {
@@ -45,15 +47,16 @@ export default function Trip({ onExpired, initialTrip }) {
     setPrompt(null); setStatus("done"); setError(""); setTrace([]);
   }, [initialTrip]);
 
-  const step = status === "done" ? 3 : prompt ? (STEP_OF[prompt.type] ?? 0) : 0;
+  const step = status === "done" ? 4 : prompt ? (STEP_OF[prompt.type] ?? 0) : 0;
 
   // fn receives onEvent: the server streams each agent step while it works
   async function run(fn, { fresh = false } = {}) {
     setError(""); setStatus("busy"); setSince(Date.now());
-    if (fresh) setTrace([]);
+    if (fresh) { setTrace([]); setUsage(null); }
     const onEvent = (ev) => setTrace((t) => mergeEvents(t, ev));
     try {
       const r = await fn(onEvent);
+      if (r.usage) setUsage(r.usage);
       setTripId(r.trip_id);
       if (r.status === "waiting") { setPrompt(r.prompt); setStatus("waiting"); }
       else {
@@ -77,7 +80,7 @@ export default function Trip({ onExpired, initialTrip }) {
   const how = trace.length > 0 && (
     <details className="trace-wrap">
       <summary><Icon name="spark" size={16} /> See how {agents} AI and rule-based agents built this</summary>
-      <AgentTrace steps={trace} title="Agent trace" />
+      <AgentTrace steps={trace} title="Agent trace" usage={usage} />
     </details>
   );
   const pick = (name) => setText(`3 day trip to ${name} for 2 people in ${MONTHS[new Date().getMonth()]}, mid-range stay`);
@@ -108,7 +111,7 @@ export default function Trip({ onExpired, initialTrip }) {
               English, Hindi and Hinglish all work.
             </p>
             <div className="prompt-box">
-              <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)}
+              <textarea rows={3} maxLength={1500} value={text} onChange={(e) => setText(e.target.value)}
                         placeholder={EXAMPLE} aria-label="Describe your trip" />
               <div className="prompt-foot">
                 <div className="chips tight" aria-label="Examples">
@@ -162,7 +165,7 @@ export default function Trip({ onExpired, initialTrip }) {
           <span className="icon-chip"><Icon name="chat" size={20} /></span>
           <h2>One more thing</h2>
           <p>{prompt.message}</p>
-          <input value={answer} onChange={(e) => setAnswer(e.target.value)} autoFocus
+          <input value={answer} maxLength={1500} onChange={(e) => setAnswer(e.target.value)} autoFocus
                  placeholder="e.g. 2 people in November" aria-label="Your answer" />
           <button className="primary lg" disabled={!answer.trim()}>Continue <Icon name="arrow" size={18} /></button>
         </form>
@@ -178,6 +181,7 @@ export default function Trip({ onExpired, initialTrip }) {
                 <span className="option-icon"><Icon name="route" size={20} /></span>
                 <span className="option-body">
                   <strong>{o.label}</strong>
+                  {o.visited?.length > 0 && <span className="pill"><Icon name="clock" size={13} /> You visited {o.visited.join(" and ")} before</span>}
                   {o.reasons.length > 0
                     ? <span className="pill warn"><Icon name="alert" size={13} /> Heads-up: {o.reasons.join("; ")}</span>
                     : <span className="pill ok"><Icon name="check" size={13} /> Good fit for your dates</span>}
@@ -196,18 +200,25 @@ export default function Trip({ onExpired, initialTrip }) {
           <div className="actionbar">
             <div className="actions">
               <button className="primary lg" onClick={() => reply({ action: "approve" })}>
-                <Icon name="check" size={18} /> Approve and get booking checklist
+                <Icon name="check" size={18} /> Approve plan
               </button>
               <button className="link danger" onClick={() => reply({ action: "cancel" })}>Cancel</button>
             </div>
             <form className="change" onSubmit={(e) => { e.preventDefault(); change.trim() && reply({ action: "edit", text: change.trim() }); }}>
-              <input value={change} onChange={(e) => setChange(e.target.value)}
+              <input value={change} maxLength={1500} onChange={(e) => setChange(e.target.value)}
                      placeholder="Or ask for a change, e.g. less walking, add a yoga class"
                      aria-label="Requested change" />
               <button disabled={!change.trim()}>Update plan</button>
             </form>
           </div>
         </div>
+      )}
+
+      {status === "waiting" && prompt?.type === "hotels" && (
+        <>
+          {how && <div className="card-pad">{how}</div>}
+          <HotelPicker prompt={prompt} onSubmit={(v) => reply(v)} />
+        </>
       )}
 
       {status === "done" && (
@@ -228,7 +239,7 @@ export default function Trip({ onExpired, initialTrip }) {
                     ))}
                   </select>
                 </label>
-                <input value={reason} onChange={(e) => setReason(e.target.value)}
+                <input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)}
                        placeholder="e.g. heavy rain forecast, bus cancelled, want fewer temples"
                        aria-label="What changed" />
                 <button className="primary" disabled={!reason.trim()}>Re-plan</button>

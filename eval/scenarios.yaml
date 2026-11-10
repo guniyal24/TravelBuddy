@@ -1,0 +1,68 @@
+# Trip-planning scenarios for eval/plans.py. Every check is computed in code from the plan.
+#   text      what the traveller types
+#   followup  answer if the planner asks for missing details
+#   expect    days: plan length; towns: destination ids the plan must include (and the
+#             circuit offered first should cover); veg: no meat/fish/bar eateries;
+#             budget: cost must fit or the plan must say it does not; health: a high-altitude
+#             health note is required (vulnerable travellers going above 2,500 m)
+scenarios:
+  - {id: p01, text: "3 days in Haridwar and Rishikesh for 2 people in November, temples and local food",
+     expect: {days: 3, towns: [destination_haridwar, destination_rishikesh]}}
+  - {id: p02, text: "Nainital aur Almora, 4 din, vegetarian khana, 2 log, December",
+     expect: {days: 4, towns: [destination_nainital, destination_almora], veg: true}}
+  - {id: p03, text: "2 days in Mussoorie for a family of 4 in May, mid-range hotels",
+     expect: {days: 2, towns: [destination_mussoorie]}}
+  - {id: p04, text: "5 days in Rishikesh and Mussoorie for 2 people in March, adventure and cafes, total budget 30000 rupees",
+     expect: {days: 5, towns: [destination_rishikesh, destination_mussoorie], budget: 30000}}
+  - {id: p05, text: "Badrinath for 3 days in June with my 70-year-old parents",
+     followup: "3 people", expect: {days: 3, towns: [destination_badrinath], health: true}}
+  - {id: p06, text: "Jim Corbett safari trip, 2 days, 2 people, February",
+     expect: {days: 2, towns: [destination_jim_corbett]}}
+  - {id: p07, text: "Dehradun food tour for 2 days, 3 friends, October, non-veg is fine",
+     expect: {days: 2, towns: [destination_dehradun]}}
+  - {id: p08, text: "A quiet 3-day retreat in Ranikhet for a couple in April",
+     followup: "2 people", expect: {days: 3, towns: [destination_ranikhet]}}
+  - {id: p09, text: "Nainital, Ranikhet and Almora in 5 days for 2 people in October, vegetarian",
+     expect: {days: 5, towns: [destination_nainital, destination_ranikhet, destination_almora], veg: true}}
+  - {id: p10, text: "हरिद्वार और ऋषिकेश, 3 दिन, 4 लोग, नवंबर, शाकाहारी खाना",
+     expect: {days: 3, towns: [destination_haridwar, destination_rishikesh], veg: true}}
+  - {id: p11, text: "Solo yoga trip to Rishikesh for 4 days in September, budget stay",
+     followup: "1 person", expect: {days: 4, towns: [destination_rishikesh]}}
+  - {id: p12, text: "2 days in Mussoorie for our honeymoon in December, premium hotels",
+     followup: "2 people", expect: {days: 2, towns: [destination_mussoorie]}}
+  - {id: p13, text: "3 days in Nainital for 2 people in January with a total budget of 8000 rupees",
+     expect: {days: 3, towns: [destination_nainital], budget: 8000}}
+  - {id: p14, text: "Dehradun and Mussoorie for 3 days, 5 people, August",
+     expect: {days: 3, towns: [destination_dehradun, destination_mussoorie]}}
+  - {id: p15, text: "Jim Corbett and Nainital, 4 days, family of 4 with two small kids, May",
+     expect: {days: 4, towns: [destination_jim_corbett, destination_nainital]}}
+  - {id: p16, text: "2 days in Almora for 2 people in November, heritage and mountain views",
+     expect: {days: 2, towns: [destination_almora]}}
+  - {id: p17, text: "6-day Kumaon trip covering Nainital, Ranikhet and Almora for 2 people in March",
+     expect: {days: 6, towns: [destination_nainital, destination_ranikhet, destination_almora]}}
+  - {id: p18, text: "A 1-day trip to Haridwar for 2 people in March",
+     expect: {days: 1, towns: [destination_haridwar]}}
+  - {id: p19, text: "Somewhere peaceful for 3 days in October for 2 people",
+     expect: {days: 3}}
+  - {id: p20, text: "Mussoorie mein 3 din, 2 log, July, budget hotel",
+     expect: {days: 3, towns: [destination_mussoorie]}}
+  - {id: p21, text: "Rishikesh for 3 days, 2 people, rafting and cafes, vegetarian, March",
+     expect: {days: 3, towns: [destination_rishikesh], veg: true}}
+  - {id: p22, text: "Rishikesh and Badrinath in 5 days for 2 people in May",
+     expect: {days: 5, towns: [destination_rishikesh, destination_badrinath]}}
+  - {id: p23, text: "Corbett for 3 days with 6 friends in March, total budget 20000 rupees",
+     expect: {days: 3, towns: [destination_jim_corbett], budget: 20000}}
+  - {id: p24, text: "Nainital for 2 days in June with my elderly mother",
+     followup: "2 people", expect: {days: 2, towns: [destination_nainital]}}
+  - {id: p25, text: "Dehradun for 2 days in November, 1 person, business trip with some sightseeing",
+     expect: {days: 2, towns: [destination_dehradun]}}
+  - {id: p26, text: "Ek hafte ka Uttarakhand trip, 2 log, October, pahad aur mandir",
+     expect: {days: 7}}
+  - {id: p27, text: "Ranikhet and Almora for 3 days, 2 people, April, vegetarian",
+     expect: {days: 3, towns: [destination_ranikhet, destination_almora], veg: true}}
+  - {id: p28, text: "Haridwar and Rishikesh for 2 days, a group of 10 people, April, budget stay",
+     expect: {days: 2, towns: [destination_haridwar, destination_rishikesh]}}
+  - {id: p29, text: "Mussoorie and Dehradun for 4 days, 2 people, December",
+     expect: {days: 4, towns: [destination_mussoorie, destination_dehradun]}}
+  - {id: p30, text: "Badrinath for 2 days in October, 2 people, one of us has asthma",
+     expect: {days: 2, towns: [destination_badrinath], health: true}}
