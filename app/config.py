@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # str_strip_whitespace: a key pasted into a hosting dashboard often carries a trailing space
+    # or newline, which is illegal in an HTTP header and makes every call fail to connect.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", str_strip_whitespace=True)
 
     # Auth. No default on purpose: the app must fail fast if it is missing.
     secret_key: str = Field(min_length=16)
