@@ -229,3 +229,32 @@ def test_api_turns_an_outage_into_a_503_and_a_stream_error():
         assert r.status_code == 503 and r.json()["detail"] == UNAVAILABLE_MSG
         s = c.post("/api/trips?stream=true", json={"text": "x"}, headers=h)
         assert UNAVAILABLE_MSG in s.text and '"type": "error"' in s.text
+
+
+# ---------- ablation switches (evaluation only) ----------
+def test_critic_ablation_lets_an_invalid_draft_through():
+    from test_trip_graph import REQ, FakeLLM, FakeRetriever, FakeStore
+
+    from app.graph.trip_graph import TripPlanner
+    bad = {"days": [{"day": 1, "destination": HW, "stops": ["INVENTED"], "meals": [],
+                     "stay": "s_hw1"}, *GOOD["days"][1:]]}
+    tp = TripPlanner(FakeLLM([REQ, bad]), FakeRetriever(), FakeStore(), "s", "b",
+                     ablate=frozenset({"critic"}))
+    tp.start("a", "x")
+    r = tp.resume("a", f"{HW}+{RK}")
+    assert r["prompt"]["plan"]["days"][0]["stops"] == ["INVENTED"]  # nothing caught it
+
+
+def test_food_ablation_skips_the_diet_filter():
+    from test_trip_graph import REQ, FakeLLM, FakeRetriever, FakeStore
+
+    from app.graph.trip_graph import TripPlanner
+    on = TripPlanner(FakeLLM([{**REQ, "diet": "veg"}]), FakeRetriever(), FakeStore(), "s", "b")
+    off = TripPlanner(FakeLLM([{**REQ, "diet": "veg"}]), FakeRetriever(), FakeStore(), "s",
+                      "b", ablate=frozenset({"food"}))
+    state = {"request": {**REQ, "diet": "veg"}, "destinations": [HW],
+             "candidates": {HW: {"stops": [], "stays": [], "meals": [
+                 {"id": "m1", "name": "Chicken Corner", "description": "chicken curry"},
+                 {"id": "m2", "name": "Sattvik", "description": "pure veg thali"}]}}}
+    assert [m["id"] for m in on._specialists(state)["candidates"][HW]["meals"]] == ["m2"]
+    assert [m["id"] for m in off._specialists(state)["candidates"][HW]["meals"]] == ["m1", "m2"]

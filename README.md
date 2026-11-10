@@ -126,8 +126,17 @@ times: headline verdicts flip on 0-3% of answers. One checklist item (`on_topic`
 all on polite declines, a rubric ambiguity that is next to fix. Agreement with human labels
 (Cohen's kappa) is measured with `python -m eval.reliability label` and `agreement`.
 
+**4. Does each component earn its place?** ([`eval/ABLATIONS.md`](eval/ABLATIONS.md)) Switched
+off one at a time on the same trips: without the Critic, **2 of 30** trips reach the traveller
+with an error (a place not in our data, a meal in the wrong town); without the Food agent,
+**2 of 5** vegetarian trips include meat or bar listings. With both: 0.
+
+**5. Red team and hotel research:** 13 of 13 attacks defended
+([`eval/REDTEAM.md`](eval/REDTEAM.md)); 92% of review claims verified across 26 towns
+([`eval/CONCIERGE.md`](eval/CONCIERGE.md)).
+
 **CI gate:** `eval/gate.py` fails the build if answer or plan quality regresses, or if any
-judgement is incomplete.
+judgement is incomplete; the red-team suite must pass too.
 
 ## Engineering
 
@@ -140,7 +149,7 @@ judgement is incomplete.
 - **Red team: 13 of 13 attacks defended** on the live system (prompt extraction, secrets,
   other users' data, jailbreaks, fake context, HTML injection, planner injection;
   [`eval/REDTEAM.md`](eval/REDTEAM.md)), checked in code wherever possible and gated in CI.
-- **258 tests** (pytest), ruff, CI on every push, storage tests against real Postgres in CI.
+- **260 tests** (pytest), ruff, CI on every push, storage tests against real Postgres in CI.
 - Guardrails: size limits on every request, per-user and guest rate limits (Redis, in-memory
   fallback), JWT auth, CORS, guest sessions capped per IP and per day, daily caps on Google and
   web-search calls.
@@ -151,6 +160,13 @@ judgement is incomplete.
   be traced to Langfuse by setting its keys (optional, not exercised in this repo's tests).
 - Data pipeline (`ingest/`) with provenance and confidence on every fact, and licence-aware
   handling of Google-sourced data.
+
+## More
+
+- [Technical write-up (draft)](docs/blog-draft.md): what made the agents reliable, and the bugs
+  that only real conditions found
+- [Use the MCP server from Cursor or any MCP host](mcp_server/README.md)
+- [Portfolio kit](docs/PORTFOLIO.md): resume bullets, interview talking points, a demo script
 
 ## Tech stack
 

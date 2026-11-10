@@ -33,11 +33,13 @@ from app.graph.agents import NON_VEG, _text
 from eval.stats import fmt_rate
 
 ROOT = Path(__file__).resolve().parent
-CHECKS = ["completes", "day_count", "towns_covered", "named_first", "meals_in_town",
+CHECKS = ["completes", "known_places", "day_count", "towns_covered", "named_first",
+          "meals_in_town",
           "stays_nightly", "veg_respected", "budget_honest", "health_noted", "valid_first_try",
           "no_fallback"]
 LABELS = {
     "completes": "reaches the approval step", "day_count": "exact number of days",
+    "known_places": "every place exists in our data",
     "towns_covered": "includes every named town", "named_first": "named towns offered first",
     "meals_in_town": "stops and meals in that day's town", "stays_nightly": "a stay every night",
     "veg_respected": "veg diet respected", "budget_honest": "budget fits or is flagged",
@@ -58,6 +60,7 @@ def score(sc: dict, run: dict) -> dict:
     days = plan.get("days") or []
     dests = {d["destination"] for d in days}
     warnings = run.get("warnings") or []
+    out["known_places"] = not run.get("unknown_ids")
     out["day_count"] = len(days) == exp.get("days", len(days))
     towns = exp.get("towns") or []
     if towns:
@@ -81,7 +84,7 @@ def score(sc: dict, run: dict) -> dict:
     return out
 
 
-def build_planner():
+def build_planner(ablate: frozenset = frozenset()):
     from pinecone import Pinecone
 
     from app.config import Settings
@@ -98,7 +101,8 @@ def build_planner():
     llm = LLM(chat, retries=6)  # batch job: wait out rate limits instead of failing
     store = GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database)
     tp = TripPlanner(llm, Retriever(embed, index, s.embed_model), store, s.router_model,
-                     s.planner_model, checkpointer=MemorySaver(), tools=LocalTools())
+                     s.planner_model, checkpointer=MemorySaver(), tools=LocalTools(),
+                     ablate=ablate)
     return tp, llm
 
 
@@ -128,6 +132,7 @@ def run_scenario(tp, sc: dict) -> dict:
     vals = tp.graph.get_state({"configurable": {"thread_id": tid}}).values
     used = {i for d in (vals.get("plan") or {}).get("days", [])
             for i in [*(d.get("stops") or []), *(d.get("meals") or []), d.get("stay")] if i}
+    run["unknown_ids"] = sorted(i for i in used if i not in (vals.get("entities") or {}))
     run.update({
         "request": vals.get("request"), "plan": vals.get("plan"),
         "entities": {i: {k: e.get(k) for k in ("name", "type", "destination_id", "description",
@@ -176,13 +181,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only", nargs="*")
+    ap.add_argument("--ablate", nargs="*", default=[], choices=["critic", "food"],
+                    help="switch components off (results saved separately; PLANS.md untouched)")
     args = ap.parse_args()
     scenarios = yaml.safe_load((ROOT / "scenarios.yaml").read_text())["scenarios"]
     if args.only:
         scenarios = [s for s in scenarios if s["id"] in args.only]
     if args.limit:
         scenarios = scenarios[: args.limit]
-    tp, llm = build_planner()
+    tp, llm = build_planner(frozenset(args.ablate))
     rows = []
     for sc in scenarios:
         before, t0 = llm.calls, time.time()
@@ -200,7 +207,14 @@ def main() -> None:
         print(f"{sc['id']} {run['latency_s']:>5}s  {status}")
     out = ROOT / "results"
     out.mkdir(exist_ok=True)
-    (out / f"{date.today()}-plans.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False))
+    tag = "-no-" + "-no-".join(sorted(args.ablate)) if args.ablate else ""
+    (out / f"{date.today()}-plans{tag}.json").write_text(
+        json.dumps(rows, indent=2, ensure_ascii=False))
+    if args.ablate:
+        from eval.ablations import write_ablations
+        write_ablations()
+        print("\n" + (ROOT / "ABLATIONS.md").read_text())
+        return
     write_report(rows, ROOT / "PLANS.md")
     print("\n" + (ROOT / "PLANS.md").read_text())
 
