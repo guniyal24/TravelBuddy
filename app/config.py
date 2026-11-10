@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     redis_host: str = "localhost"
     redis_port: int = 6379
     rate_limit_per_minute: int = 10
+    # Guest mode: try the app without an account. Guests get a stricter limit and a token that
+    # expires; new guest sessions are limited per IP so the LLM bill stays bounded.
+    guest_enabled: bool = True
+    guest_rate_limit_per_minute: int = 5
+    guest_token_expire_minutes: int = 24 * 60
+    guest_sessions_per_ip_per_hour: int = 10
+    guest_sessions_per_day: int = 300  # global cap: holds even if a client spoofs its IP
     checkpoint_path: str = "data/checkpoints.sqlite"  # durable trip state
     trips_path: str = "data/trips.sqlite"  # saved trips, profiles, checklist state
     mcp_transport: str = "memory"  # "memory" (in-process MCP) or "stdio" (subprocess server)

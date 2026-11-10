@@ -16,6 +16,7 @@ Human decisions use `interrupt()`; the run pauses (state kept by the checkpointe
 with `Command(resume=...)`, so a plan can wait for an answer for hours.
 """
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, TypedDict
 
@@ -34,9 +35,12 @@ from app.graph.agents import (
 from app.graph.critic import fallback_plan, validate_plan
 from app.graph.render import render_itinerary
 from app.graph.schedule import build_timeline
+from app.graph.trace import Tracer
 from mcp_server.client import LocalTools, ToolError
 
 log = logging.getLogger(__name__)
+
+OnEvent = Callable[[dict], None] | None
 
 MAX_ASKS = 2
 MAX_PLAN_ATTEMPTS = 3
@@ -576,14 +580,17 @@ class TripPlanner:
         return g.compile(checkpointer=checkpointer)
 
     # ---------------- public API ----------------
+    # Every entry point takes an optional `on_event` callback. With it, the graph is streamed and
+    # each agent step is reported as it starts and finishes (see app/graph/trace.py).
     def start(self, thread_id: str, text: str, owner: str = "",
-              profile: dict | None = None) -> dict[str, Any]:
-        return self._result(self.graph.invoke(
+              profile: dict | None = None, on_event: OnEvent = None) -> dict[str, Any]:
+        return self._run(
             {"user_text": text, "asks": 0, "plan_attempts": 0, "edits": 0, "status": "running",
              "owner": owner, "profile": profile or {}},
-            self._cfg(thread_id)), thread_id)
+            thread_id, on_event)
 
-    def replan(self, thread_id: str, from_day: int, reason: str) -> dict[str, Any]:
+    def replan(self, thread_id: str, from_day: int, reason: str,
+               on_event: OnEvent = None) -> dict[str, Any]:
         """Change a finished trip from `from_day` on (bad weather, a cancelled bus, a change of
         mind). Earlier days are kept exactly; the rest is re-planned, re-validated and sent
         back for the traveller's approval like any other edit."""
@@ -600,16 +607,38 @@ class TripPlanner:
             "plan_attempts": 0, "edits": 0, "status": "running",
             "locked_days": [d for d in vals["plan"]["days"] if d["day"] < from_day],
             "replan_from": from_day}, as_node="edit")
-        return self._result(self.graph.invoke(None, cfg), thread_id)
+        return self._run(None, thread_id, on_event)
 
     def owner(self, thread_id: str) -> str | None:
         """Owner of a stored trip, or None if the trip does not exist."""
         snap = self.graph.get_state(self._cfg(thread_id))
         return snap.values.get("owner", "") if snap and snap.values else None
 
-    def resume(self, thread_id: str, value: Any) -> dict[str, Any]:
-        return self._result(self.graph.invoke(Command(resume=value), self._cfg(thread_id)),
-                            thread_id)
+    def resume(self, thread_id: str, value: Any, on_event: OnEvent = None) -> dict[str, Any]:
+        return self._run(Command(resume=value), thread_id, on_event)
+
+    def _run(self, inp: Any, thread_id: str, on_event: OnEvent) -> dict[str, Any]:
+        cfg = self._cfg(thread_id)
+        if on_event is None:
+            return self._result(self.graph.invoke(inp, cfg), thread_id)
+
+        def emit(event: dict) -> None:  # a broken listener must never break the plan
+            try:
+                on_event(event)
+            except Exception:
+                log.exception("progress listener failed")
+
+        tracer = Tracer(emit)
+        for chunk in self.graph.stream(inp, cfg, stream_mode="tasks"):
+            try:
+                tracer.feed(chunk)
+            except Exception:
+                log.exception("could not describe a graph step")
+        snap = self.graph.get_state(cfg)
+        out = dict(snap.values)
+        if snap.interrupts:
+            out["__interrupt__"] = snap.interrupts
+        return self._result(out, thread_id)
 
     @staticmethod
     def _cfg(thread_id: str) -> dict:

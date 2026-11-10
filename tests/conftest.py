@@ -43,19 +43,32 @@ class FakePlanner:
     def owner(self, thread_id):
         return self.owners.get(thread_id)
 
-    def replan(self, thread_id, from_day, reason):
+    @staticmethod
+    def _emit(on_event, node):
+        if on_event:
+            on_event({"id": node, "node": node, "agent": node.title(), "phase": "start",
+                      "message": f"{node} working", "details": [], "tone": "info"})
+            on_event({"id": node, "node": node, "agent": node.title(), "phase": "end",
+                      "message": f"{node} done", "details": [], "tone": "ok", "ms": 5})
+
+    def replan(self, thread_id, from_day, reason, on_event=None):
         self.calls.append(("replan", thread_id, from_day, reason))
         if from_day > 3:
             raise ValueError("from_day must be between 1 and 3.")
+        self._emit(on_event, "plan")
         return {"status": "waiting", "prompt": {"type": "approve", "preview": "new plan"}}
 
-    def start(self, thread_id, text, owner="", profile=None):
+    def start(self, thread_id, text, owner="", profile=None, on_event=None):
         self.calls.append(("start", thread_id, text))
         self.owners[thread_id] = owner
+        self._emit(on_event, "extract")
         return {"status": "waiting", "prompt": {"type": "choose", "options": []}}
 
-    def resume(self, thread_id, value):
+    def resume(self, thread_id, value, on_event=None):
         self.calls.append(("resume", thread_id, value))
+        if value == "explode":
+            raise RuntimeError("model provider down")
+        self._emit(on_event, "critic")
         return {"status": "done", "itinerary": "# plan"}
 
 
