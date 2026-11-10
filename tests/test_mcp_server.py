@@ -65,3 +65,40 @@ def test_server_registers_all_tools_and_calls_one():
     res = asyncio.run(server.call_tool("check_season",
                                        {"place_id": "destination_haridwar", "month": 11}))
     assert "good" in str(res)
+
+
+def _met(*steps):
+    return {"properties": {"timeseries": [
+        {"time": t, "data": {"instant": {"details": {"air_temperature": temp}},
+                             key: {"details": {"precipitation_amount": rain}}}}
+        for t, temp, key, rain in steps]}}
+
+
+def test_met_steps_become_indian_dates_without_double_counting_rain():
+    data = _met(("2026-11-12T18:00:00Z", 9.0, "next_1_hours", 1.0),   # 23:30 IST, 12 Nov
+                ("2026-11-12T19:00:00Z", 8.0, "next_1_hours", 2.0),   # 00:30 IST, 13 Nov
+                ("2026-11-13T06:00:00Z", 21.0, "next_6_hours", 4.0),  # 11:30 IST, 13 Nov
+                ("2026-11-14T06:00:00Z", 20.0, "next_6_hours", 0.0))  # outside the range
+    days = weather.met_daily(data, date(2026, 11, 12), date(2026, 11, 13))
+    assert days == [
+        {"date": "2026-11-12", "max_c": 9.0, "min_c": 9.0, "rain_mm": 1.0},
+        {"date": "2026-11-13", "max_c": 21.0, "min_c": 8.0, "rain_mm": 6.0}]
+
+
+def test_a_rate_limited_forecast_falls_back_to_met_norway():
+    import httpx
+
+    def limited(url, params):
+        req = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError("429", request=req, response=httpx.Response(429, request=req))
+
+    met = _met(("2026-11-11T06:00:00Z", 20.0, "next_6_hours", 0.5))
+    out = weather.get_weather(30.0, 78.0, date(2026, 11, 11), date(2026, 11, 11),
+                              today=date(2026, 11, 10), fetch=limited,
+                              fetch_met=lambda lat, lon: met)
+    assert out["source"] == "MET Norway" and out["kind"] == "forecast"
+    assert out["days"][0]["max_c"] == 20.0
+    with pytest.raises(httpx.HTTPStatusError):  # MET does not reach these dates: say so
+        weather.get_weather(30.0, 78.0, date(2026, 11, 22), date(2026, 11, 23),
+                            today=date(2026, 11, 10), fetch=limited,
+                            fetch_met=lambda lat, lon: met)
