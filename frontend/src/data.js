@@ -39,7 +39,7 @@ export const STACK = ["LangGraph", "Self-RAG", "MCP tools", "Neo4j", "Pinecone",
 export const FAQ = [
   ["Does it book anything for me?", "No. It gives you a checklist with links to the official booking sites. You pay there, and tick items off here to track your progress."],
   ["How reliable are the costs and travel times?", "Costs are ranges. Each line is marked as coming from a listing or from an assumption. Road distances and hours are estimates, so check live conditions before you travel."],
-  ["Which places can it plan?", "Haridwar, Rishikesh, Dehradun, Mussoorie, Nainital, Almora, Ranikhet, Jim Corbett and Badrinath. Auli and Kedarnath are not offered yet because there is not enough verified data."],
+  ["Which places can it plan?", "26 towns across Garhwal and Kumaon: the classics (Haridwar, Rishikesh, Mussoorie, Nainital, Almora, Jim Corbett) plus Kedarnath, Badrinath, Gangotri, Auli, the Valley of Flowers, Chopta, Kausani, Mukteshwar, Bhimtal, Lansdowne, Munsiyari, Pithoragarh and more. Places come from Wikivoyage and OpenStreetMap."],
   ["Can I use it offline?", "The app opens offline and your recently opened trips stay available. Planning and chat need a connection, and map tiles need one too."],
   ["Is my data private?", "Your account, preferences and trips are stored for your login only. It is a portfolio project, so please do not enter anything sensitive."],
 ];

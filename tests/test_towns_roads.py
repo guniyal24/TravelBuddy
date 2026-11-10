@@ -105,3 +105,12 @@ def test_trek_access_is_always_mentioned():
     assert set(ACCESS_NOTES) == {"destination_kedarnath", "destination_ghangaria"}
     r = transport_options("destination_joshimath", "destination_ghangaria")
     assert "trek" in r["note"]
+
+
+def test_safety_agent_always_mentions_trek_only_access():
+    from app.graph.agents import SafetyAgent
+    from mcp_server.client import LocalTools
+    plan = {"days": [{"day": 1, "destination": "destination_kedarnath", "stops": [],
+                      "meals": [], "stay": None}]}
+    out = SafetyAgent(LocalTools()).review(plan, {}, {"days": 1, "month": 10})
+    assert any(w.startswith("Access, Kedarnath: Roads end at Gaurikund") for w in out["warnings"])

@@ -14,7 +14,7 @@ plan after the Critic accepts it.
 import re
 
 from app.cost.pricing import parse_price_range
-from app.towns import ELEVATION_M
+from app.towns import ACCESS_NOTES, ELEVATION_M
 from mcp_server.client import ToolError
 
 # Approximate town elevations (m), used only when a stay has no measured elevation.
@@ -130,6 +130,10 @@ class SafetyAgent:
             warnings.append(f"Health: {names} is above {HIGH_TOWN_M} m. With children, elderly "
                             "travellers or heart/lung conditions, see a doctor first and carry "
                             "regular medicines.")
+        for dest in dict.fromkeys(d["destination"] for d in plan["days"]):
+            if note := ACCESS_NOTES.get(dest):  # trek-only towns: never let this be missed
+                name = dest.removeprefix("destination_").replace("_", " ").title()
+                warnings.append(f"Access, {name}: {note}")
         advisories = []
         for dest in dict.fromkeys(d["destination"] for d in plan["days"]):
             try:

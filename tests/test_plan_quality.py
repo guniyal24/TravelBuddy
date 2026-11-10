@@ -97,9 +97,10 @@ def test_single_named_town_beats_bigger_circuits():
 
 
 def test_unavailable_town_is_explained_not_silently_dropped():
-    prompt, _ = _choose("4 days in Auli for skiing", {"days": 4, "interests": ["ski"]})
-    assert prompt["message"].startswith("Auli can't be planned yet")
-    assert all("auli" not in o["id"] for o in prompt["options"])
+    # Jageshwar is in the registry but has no stays in the data, so it is not offered yet
+    prompt, _ = _choose("4 days in Jageshwar for the temples", {"days": 4, "interests": []})
+    assert prompt["message"].startswith("Jageshwar can't be planned yet")
+    assert all("jageshwar" not in o["id"] for o in prompt["options"])
 
 
 def test_first_named_town_is_not_mistaken_for_the_origin():

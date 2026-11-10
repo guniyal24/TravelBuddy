@@ -30,7 +30,7 @@ TravelBuddy's rule: **the LLM composes, code checks, the human decides.**
 
 | | |
 |---|---|
-| **Plans from a knowledge graph** | 333 sourced listings (Wikivoyage, OpenStreetMap) in Neo4j + Pinecone. The planner may only use ids it was given; a Critic rejects anything else. |
+| **Plans from a knowledge graph** | 721 sourced places in 26 towns (Wikivoyage and OpenStreetMap) in Neo4j + Pinecone. The planner may only use ids it was given; a Critic rejects anything else. |
 | **Human in the loop** | Pick a circuit, approve or ask for changes ("less walking", "add a yoga class"), re-plan mid-trip from any day. Paused plans survive server restarts. |
 | **Live agent trace** | Each agent's real work streams to the UI (Server-Sent Events): what it found, what the Critic rejected, timings. |
 | **Concierge** | After you approve, hotel agents run in parallel, one per overnight town. They read Google reviews of that town's hotels, an analyst extracts pros and cons **with exact quotes** (checked in code; 95% survive), a code ranker orders them, and you pick. The plan and cost update. |
@@ -38,6 +38,7 @@ TravelBuddy's rule: **the LLM composes, code checks, the human decides.**
 | **Safety agent** | Altitude-gain rules, high-altitude health notes, monthly advisories with official links to confirm. |
 | **Honest costs** | Ranges, never single numbers; every line says if it is a listing price or an assumption. |
 | **Grounded Q&A** | Self-RAG answers with citations, and declines instead of guessing. |
+| **Dates, weather and roads** | Say "from next Friday" and the plan gets real dates. A weather agent checks every day's town (live forecast within 16 days, otherwise a labelled typical estimate) and flags heavy rain with a re-plan suggestion. Road times come from OpenStreetMap routing, calibrated against hand-checked routes (distances within 4%). |
 | **Hindi / Hinglish** | Requests, plans and answers follow the traveller's language. |
 | **Try without an account** | One-click guest mode with per-IP and daily cost caps. |
 | **Export & offline** | WhatsApp text, PDF, calendar (.ics), booking checklist; opened trips work offline (PWA). |
@@ -130,7 +131,7 @@ judgement is incomplete.
 
 ## Engineering
 
-- **195 tests** (pytest), ruff, CI on every push, storage tests against real Postgres in CI.
+- **240 tests** (pytest), ruff, CI on every push, storage tests against real Postgres in CI.
 - Guardrails: per-user and guest rate limits (Redis, in-memory fallback), JWT auth, CORS,
   guest sessions capped per IP and per day.
 - Graceful degradation: tool failures become "unknown", never invented values; a rule-based
@@ -178,7 +179,7 @@ frontend/    React app (PWA)
 ## Roadmap
 
 1. Reliable LLM-as-judge: checklists, a multi-model jury, human-label agreement.
-2. Real travel dates with live weather, more towns, road routing.
+2. Tighten the judge's `on_topic` rubric for polite declines; collect human labels for kappa.
 
 ## Data and licences
 
