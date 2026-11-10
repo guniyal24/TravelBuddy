@@ -8,6 +8,16 @@ const store = {
 export const getToken = store.get;
 export const clearToken = () => store.set(null);
 
+// Reads the (unverified) token payload only to adapt the UI; the server checks the signature.
+export function isGuest() {
+  const t = store.get();
+  if (!t) return false;
+  try {
+    const b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(b64)).guest === true;
+  } catch { return false; }
+}
+
 async function readError(res) {
   if (res.status === 429) return "You're sending requests too fast. Please wait a minute.";
   try { const j = await res.json(); return typeof j.detail === "string" ? j.detail : "Request failed"; }
@@ -46,13 +56,42 @@ export async function login(email, password) {
   store.set((await res.json()).access_token);
 }
 
-export async function startTrip(text) {
-  return (await request("/api/trips", { json: { text } })).json();
+// Try the app without an account: a short-lived guest token.
+export async function guestLogin() {
+  const res = await request("/api/guest", { auth: false });
+  store.set((await res.json()).access_token);
 }
 
-export async function resumeTrip(tripId, value) {
-  return (await request(`/api/trips/${tripId}/resume`, { json: { value } })).json();
+// Trip calls. With onEvent, the server streams each agent step (Server-Sent Events) and the
+// promise resolves with the same body as the plain JSON call.
+async function tripCall(path, json, onEvent) {
+  if (!onEvent) return (await request(path, { json })).json();
+  const res = await request(`${path}?stream=true`, { json });
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      const data = block.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+      if (!data) continue; // keep-alive comment
+      const ev = JSON.parse(data);
+      if (ev.type === "progress") onEvent(ev);
+      else if (ev.type === "error") throw new Error(ev.detail || "Planning failed.");
+      else if (ev.type === "result") { reader.cancel().catch(() => {}); return ev; }
+    }
+  }
+  throw new Error("The connection dropped while planning. Please try again.");
 }
+
+export const startTrip = (text, onEvent) => tripCall("/api/trips", { text }, onEvent);
+export const resumeTrip = (tripId, value, onEvent) =>
+  tripCall(`/api/trips/${tripId}/resume`, { value }, onEvent);
 
 export async function getProfile() {
   return (await request("/api/profile", { method: "GET" })).json();
@@ -69,9 +108,8 @@ export async function getTrip(id) {
 export async function setCheck(id, itemId, done) {
   await request(`/api/trips/${id}/checklist`, { method: "PUT", json: { item_id: itemId, done } });
 }
-export async function replanTrip(id, fromDay, reason) {
-  return (await request(`/api/trips/${id}/replan`, { json: { from_day: fromDay, reason } })).json();
-}
+export const replanTrip = (id, fromDay, reason, onEvent) =>
+  tripCall(`/api/trips/${id}/replan`, { from_day: fromDay, reason }, onEvent);
 // format: txt | pdf | ics (ics needs start = YYYY-MM-DD)
 export async function exportTrip(id, format, start) {
   const q = new URLSearchParams({ format, ...(start ? { start } : {}) });

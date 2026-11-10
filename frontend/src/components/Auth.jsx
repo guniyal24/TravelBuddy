@@ -5,7 +5,7 @@ import Logo from "./Logo.jsx";
 import Mountains from "./Mountains.jsx";
 
 // Login / sign-up dialog shown over the landing page.
-export default function Auth({ mode, onMode, onClose, onDone, notice }) {
+export default function Auth({ mode, onMode, onClose, onDone, notice, onGuest, guestBusy }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -68,6 +68,11 @@ export default function Auth({ mode, onMode, onClose, onDone, notice }) {
           <button type="button" className="link" onClick={() => onMode(isLogin ? "register" : "login")}>
             {isLogin ? "New here? Create an account" : "Have an account? Log in"}
           </button>
+          {onGuest && (
+            <button type="button" className="link" onClick={onGuest} disabled={guestBusy}>
+              {guestBusy ? "Opening…" : "Or continue as a guest"}
+            </button>
+          )}
         </form>
       </div>
     </div>

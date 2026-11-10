@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { clearToken, getToken } from "./api.js";
+import { clearToken, getToken, guestLogin, isGuest } from "./api.js";
 import Auth from "./components/Auth.jsx";
 import Chat from "./components/Chat.jsx";
 import Icon from "./components/Icon.jsx";
@@ -30,18 +30,41 @@ export default function App() {
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
 
+  const [guest, setGuest] = useState(isGuest());
+  const [guestBusy, setGuestBusy] = useState(false);
+
   const closeAuth = useCallback(() => { setAuthMode(null); setNotice(""); }, []);
-  const logout = () => { clearToken(); setAuthed(false); setTab("trip"); window.scrollTo(0, 0); };
-  const onExpired = () => { setAuthed(false); setNotice("Your session expired. Please log in again."); setAuthMode("login"); };
+  const logout = () => { clearToken(); setAuthed(false); setGuest(false); setTab("trip"); window.scrollTo(0, 0); };
+  const onExpired = () => {
+    setAuthed(false);
+    setNotice(guest ? "Your guest session ended. Create a free account to keep your trips, or try again as a guest."
+      : "Your session expired. Please log in again.");
+    setAuthMode(guest ? "register" : "login");
+    setGuest(false);
+  };
   const go = (t) => { setTab(t); window.scrollTo({ top: 0 }); };
+  const signUp = () => { logout(); setAuthMode("register"); };
+
+  async function tryAsGuest() {
+    setGuestBusy(true);
+    try {
+      await guestLogin();
+      setGuest(true); setAuthed(true); setAuthMode(null); setNotice(""); setTab("trip");
+      window.scrollTo(0, 0);
+    } catch (e) {
+      setNotice(e.message); setAuthMode("register");
+    } finally { setGuestBusy(false); }
+  }
 
   if (!authed) {
     return (
       <>
-        <Landing onLogin={() => setAuthMode("login")} onRegister={() => setAuthMode("register")} />
+        <Landing onLogin={() => setAuthMode("login")} onRegister={() => setAuthMode("register")}
+                 onGuest={tryAsGuest} guestBusy={guestBusy} />
         {authMode && (
           <Auth mode={authMode} onMode={setAuthMode} onClose={closeAuth} notice={notice}
-                onDone={() => { setAuthed(true); closeAuth(); }} />
+                onGuest={tryAsGuest} guestBusy={guestBusy}
+                onDone={() => { setAuthed(true); setGuest(false); closeAuth(); }} />
         )}
       </>
     );
@@ -60,9 +83,19 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <button className="logout" onClick={logout}><Icon name="logout" size={18} /> <span>Log out</span></button>
+          <button className="logout" onClick={logout}><Icon name="logout" size={18} /> <span>{guest ? "Exit guest" : "Log out"}</span></button>
         </div>
       </header>
+
+      {guest && (
+        <div className="container">
+          <div className="guest-bar" role="status">
+            <Icon name="eye" size={18} />
+            <span>You're exploring as a guest. Your trips stay available for 24 hours.</span>
+            <button className="link" onClick={signUp}>Create a free account</button>
+          </div>
+        </div>
+      )}
 
       {!online && (
         <div className="container">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { cacheTrip, replanTrip, resumeTrip, startTrip } from "../api.js";
 import { DESTINATIONS, MONTHS } from "../data.js";
+import AgentTrace, { mergeEvents } from "./AgentTrace.jsx";
 import Icon from "./Icon.jsx";
 import Mountains from "./Mountains.jsx";
 import TripView from "./TripView.jsx";
@@ -14,14 +15,6 @@ const EXAMPLES = [
   ["Hinglish: Kumaon trip", "Nainital aur Almora, 4 din, vegetarian khana, 2 log, December"],
 ];
 const EXAMPLE = EXAMPLES[0][1];
-
-const BUSY = [
-  "Reading your request",
-  "Searching places and stays",
-  "Checking the season and road conditions",
-  "Building and validating your plan",
-  "Estimating the cost",
-];
 
 const WHAT_YOU_GET = [
   ["calendar", "Day-by-day plan", "Stops, meals and stays for each day."],
@@ -42,29 +35,25 @@ export default function Trip({ onExpired, initialTrip }) {
   const [trip, setTrip] = useState(null); // the saved trip once approved
   const [fromDay, setFromDay] = useState(1);
   const [reason, setReason] = useState("");
-  const [busyStep, setBusyStep] = useState(0);
+  const [trace, setTrace] = useState([]); // every agent step of this planning session
+  const [since, setSince] = useState(0);
 
   useEffect(() => {
     if (!initialTrip) return;
     cacheTrip(initialTrip);
     setTrip(initialTrip); setTripId(initialTrip.trip_id); setItinerary(initialTrip.itinerary);
-    setPrompt(null); setStatus("done"); setError("");
+    setPrompt(null); setStatus("done"); setError(""); setTrace([]);
   }, [initialTrip]);
-
-  // purely cosmetic: walk through the stages while the server works
-  useEffect(() => {
-    if (status !== "busy") return undefined;
-    setBusyStep(0);
-    const t = setInterval(() => setBusyStep((s) => Math.min(s + 1, BUSY.length - 1)), 3500);
-    return () => clearInterval(t);
-  }, [status]);
 
   const step = status === "done" ? 3 : prompt ? (STEP_OF[prompt.type] ?? 0) : 0;
 
-  async function run(fn) {
-    setError(""); setStatus("busy");
+  // fn receives onEvent: the server streams each agent step while it works
+  async function run(fn, { fresh = false } = {}) {
+    setError(""); setStatus("busy"); setSince(Date.now());
+    if (fresh) setTrace([]);
+    const onEvent = (ev) => setTrace((t) => mergeEvents(t, ev));
     try {
-      const r = await fn();
+      const r = await fn(onEvent);
       setTripId(r.trip_id);
       if (r.status === "waiting") { setPrompt(r.prompt); setStatus("waiting"); }
       else {
@@ -78,12 +67,19 @@ export default function Trip({ onExpired, initialTrip }) {
     }
   }
 
-  const start = (e) => { e.preventDefault(); if (text.trim()) run(() => startTrip(text.trim())); };
-  const reply = (value) => { setAnswer(""); setChange(""); return run(() => resumeTrip(tripId, value)); };
+  const start = (e) => { e.preventDefault(); if (text.trim()) run((on) => startTrip(text.trim(), on), { fresh: true }); };
+  const reply = (value) => { setAnswer(""); setChange(""); return run((on) => resumeTrip(tripId, value, on)); };
   const reset = () => {
     setText(""); setTripId(null); setPrompt(null); setItinerary(null); setTrip(null);
-    setReason(""); setFromDay(1); setStatus("idle"); setError("");
+    setReason(""); setFromDay(1); setStatus("idle"); setError(""); setTrace([]);
   };
+  const agents = new Set(trace.map((s) => s.agent).filter((a) => a !== "You")).size;
+  const how = trace.length > 0 && (
+    <details className="trace-wrap">
+      <summary><Icon name="spark" size={16} /> See how {agents} AI and rule-based agents built this</summary>
+      <AgentTrace steps={trace} title="Agent trace" />
+    </details>
+  );
   const pick = (name) => setText(`3 day trip to ${name} for 2 people in ${MONTHS[new Date().getMonth()]}, mid-range stay`);
 
   return (
@@ -151,17 +147,13 @@ export default function Trip({ onExpired, initialTrip }) {
       )}
 
       {status === "busy" && (
-        <div className="card center busy" role="status" aria-live="polite">
-          <div className="spinner" />
+        <div className="card busy" role="status">
           <h2>Planning your trip</h2>
-          <ul className="busy-list">
-            {BUSY.map((b, i) => (
-              <li key={b} className={i < busyStep ? "past" : i === busyStep ? "now" : ""}>
-                <Icon name={i < busyStep ? "check" : "clock"} size={16} /> {b}
-              </li>
-            ))}
-          </ul>
-          <p className="muted small">This usually takes under a minute.</p>
+          <p className="muted small">
+            Live from the server: specialist agents research, draft, check and price your plan.
+            An LLM writes the draft; rule-based agents check it. This usually takes under a minute.
+          </p>
+          <AgentTrace steps={trace} live since={since} />
         </div>
       )}
 
@@ -179,6 +171,7 @@ export default function Trip({ onExpired, initialTrip }) {
       {status === "waiting" && prompt?.type === "choose" && (
         <div className="card">
           <h2>{prompt.message}</h2>
+          {how}
           <div className="options">
             {prompt.options.map((o) => (
               <button key={o.id} className="option" onClick={() => reply(o.id)}>
@@ -198,7 +191,7 @@ export default function Trip({ onExpired, initialTrip }) {
 
       {status === "waiting" && prompt?.type === "approve" && (
         <div className="card flush">
-          <div className="card-pad"><h2>Review your plan</h2></div>
+          <div className="card-pad"><h2>Review your plan</h2>{how}</div>
           <TripView markdown={prompt.preview} timeline={prompt.timeline} />
           <div className="actionbar">
             <div className="actions">
@@ -219,11 +212,12 @@ export default function Trip({ onExpired, initialTrip }) {
 
       {status === "done" && (
         <div className="card flush">
+          {trace.length > 0 && <div className="card-pad">{how}</div>}
           <TripView markdown={itinerary} timeline={trip?.timeline} trip={trip} onExpired={onExpired} />
           {trip && (
             <form className="replan" onSubmit={(e) => {
               e.preventDefault();
-              if (reason.trim()) { const r = reason.trim(); setReason(""); run(() => replanTrip(tripId, Number(fromDay), r)); }
+              if (reason.trim()) { const r = reason.trim(); setReason(""); run((on) => replanTrip(tripId, Number(fromDay), r, on), { fresh: true }); }
             }}>
               <h3><Icon name="refresh" size={18} /> Plans changed?</h3>
               <div className="replan-row">

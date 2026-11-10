@@ -17,7 +17,7 @@ const STATS = [
   ["You", "approve every plan before it is saved"],
 ];
 
-export default function Landing({ onLogin, onRegister }) {
+export default function Landing({ onLogin, onRegister, onGuest, guestBusy }) {
   return (
     <div className="landing">
       <section className="hero">
@@ -45,11 +45,12 @@ export default function Landing({ onLogin, onRegister }) {
               checks the season and safety, and hands you a day-by-day plan with a cost range and a booking checklist.
             </p>
             <div className="hero-actions">
-              <button className="btn-accent lg" onClick={onRegister}>
-                Start planning <Icon name="arrow" size={18} />
+              <button className="btn-accent lg" onClick={onGuest} disabled={guestBusy}>
+                {guestBusy ? "Opening…" : <>Try it now, no sign-up <Icon name="arrow" size={18} /></>}
               </button>
               <a className="btn-outline lg" href="#how">See how it works</a>
             </div>
+            <p className="hero-note">Free guest session. Watch the AI agents plan your trip live.</p>
             <ul className="trust">
               <li><Icon name="book" size={16} /> Uses real listings</li>
               <li><Icon name="shield" size={16} /> Safety-checked</li>
@@ -110,7 +111,7 @@ export default function Landing({ onLogin, onRegister }) {
           <h2 className="section-title">Nine towns, planned end to end</h2>
           <div className="dest-grid">
             {DESTINATIONS.map((d) => (
-              <button key={d.id} className="dest-card" onClick={onRegister}
+              <button key={d.id} className="dest-card" onClick={onGuest}
                       style={{ "--g1": d.g[0], "--g2": d.g[1] }}>
                 <span className="dest-top"><Icon name="pin" size={18} /> Uttarakhand</span>
                 <span className="dest-name">{d.name}</span>
@@ -176,8 +177,8 @@ export default function Landing({ onLogin, onRegister }) {
       <section className="cta">
         <div className="container cta-inner">
           <h2>Where in Uttarakhand next?</h2>
-          <p>Create a free account and get a plan in about a minute.</p>
-          <button className="btn-accent lg" onClick={onRegister}>Plan my trip <Icon name="arrow" size={18} /></button>
+          <p>No sign-up needed: try it as a guest and get a plan in about a minute.</p>
+          <button className="btn-accent lg" onClick={onGuest} disabled={guestBusy}>Plan my trip <Icon name="arrow" size={18} /></button>
         </div>
       </section>
 

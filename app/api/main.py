@@ -1,7 +1,11 @@
 """FastAPI entrypoint. Services are created in the lifespan and stored on app.state,
 so tests can build the app with fakes instead of real Neo4j / Pinecone / OpenAI."""
+import json
 import logging
+import queue
+import threading
 import uuid
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -20,6 +24,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 log = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/token")
+GUEST_PREFIX = "guest:"  # guest subjects are never valid emails, so they cannot be registered
+KEEPALIVE_SECONDS = 15  # comment lines keep proxies from closing a quiet event stream
 
 
 # --- schemas ---
@@ -31,6 +37,7 @@ class UserRegister(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    guest: bool = False
 
 
 class ChatRequest(BaseModel):
@@ -123,16 +130,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         email = payload.get("sub") if payload else None
         if not email:
             raise unauthorized
+        if payload.get("guest"):
+            if not s.guest_enabled or not email.startswith(GUEST_PREFIX):
+                raise unauthorized
+            return {"email": email, "guest": True}
         user = request.app.state.store.get_user(email)
         if user is None:
             raise unauthorized
         return user
 
     async def rate_limited_user(request: Request, user: dict = Depends(current_user)) -> dict:
+        s: Settings = request.app.state.settings
+        limiter = request.app.state.limiter
+        limit = s.guest_rate_limit_per_minute if user.get("guest") else limiter.limit
         try:
-            request.app.state.limiter.check(user["email"])
+            limiter.check(user["email"], limit=limit)
         except RateLimitExceeded:
-            limit = request.app.state.limiter.limit
             raise HTTPException(
                 status_code=429, detail=f"Rate limit exceeded ({limit} req/min)."
             ) from None
@@ -169,6 +182,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"access_token": token, "token_type": "bearer"}
 
+    @app.post("/api/guest", response_model=Token)
+    async def guest(request: Request):
+        """A short-lived token for trying the app without an account."""
+        s: Settings = request.app.state.settings
+        if not s.guest_enabled:
+            raise HTTPException(status_code=404, detail="Guest mode is turned off.")
+        # Behind a proxy, uvicorn must be told to trust X-Forwarded-For (see Dockerfile) for this
+        # to be the visitor's address. The daily cap bounds cost even if the header is spoofed.
+        ip = request.client.host if request.client else "unknown"
+        limiter = request.app.state.limiter
+        try:
+            limiter.check(f"guest-ip:{ip}", limit=s.guest_sessions_per_ip_per_hour, window=3600)
+        except RateLimitExceeded:
+            raise HTTPException(status_code=429, detail="Too many guest sessions from your "
+                                "network. Please create a free account.") from None
+        try:
+            limiter.check("guest-all", limit=s.guest_sessions_per_day, window=86400)
+        except RateLimitExceeded:
+            raise HTTPException(status_code=429, detail="The demo is busy today. Please create a "
+                                "free account to keep planning.") from None
+        token = security.create_access_token(
+            {"sub": f"{GUEST_PREFIX}{uuid.uuid4()}", "guest": True},
+            s.secret_key, s.jwt_algorithm, s.guest_token_expire_minutes)
+        return {"access_token": token, "token_type": "bearer", "guest": True}
+
     @app.post("/api/chat")
     async def chat(
         body: ChatRequest,
@@ -199,6 +237,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             out["trip"] = trips.get_trip(trip_id)
         return out
 
+    def _event_stream(request: Request, trip_id: str, owner: str,
+                      run: Callable[..., dict]) -> StreamingResponse:
+        """Run the planner on its own thread and stream its progress as Server-Sent Events.
+
+        Events: {"type": "progress", ...agent step...} while it works, then exactly one
+        {"type": "result", ...same body as the JSON endpoint...} or {"type": "error", "detail"}.
+        The run finishes and is saved even if the client disconnects half way.
+        """
+        events: queue.Queue = queue.Queue()
+
+        def work() -> None:
+            try:
+                result = run(on_event=lambda ev: events.put({"type": "progress", **ev}))
+                events.put({"type": "result", **_trip_response(request, trip_id, result, owner)})
+            except ValueError as exc:
+                events.put({"type": "error", "detail": str(exc)})
+            except Exception:
+                log.exception("trip run failed trip=%s", trip_id)
+                events.put({"type": "error",
+                            "detail": "Planning failed on the server. Please try again."})
+            finally:
+                events.put(None)
+
+        threading.Thread(target=work, name=f"trip-{trip_id[:8]}", daemon=True).start()
+
+        def body():
+            while True:
+                try:
+                    ev = events.get(timeout=KEEPALIVE_SECONDS)
+                except queue.Empty:
+                    yield ": keep-alive\n\n"
+                    continue
+                if ev is None:
+                    return
+                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+
+        return StreamingResponse(body(), media_type="text/event-stream", headers={
+            "Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     def _owned_trip(request: Request, trip_id: str, user: dict) -> None:
         owner = request.app.state.planner.owner(trip_id)  # stored in durable trip state
         if owner is None:
@@ -222,13 +299,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def put_profile(body: dict, request: Request, user: dict = Depends(current_user)):
         return request.app.state.trips.save_profile(user["email"], body)
 
+    # Trip endpoints answer with JSON, or with a live event stream of the agents' work when
+    # called with ?stream=true.
     @app.post("/api/trips")
-    async def start_trip(body: TripStart, request: Request,
+    async def start_trip(body: TripStart, request: Request, stream: bool = False,
                          user: dict = Depends(rate_limited_user)):
         trip_id = str(uuid.uuid4())
         profile = request.app.state.trips.get_profile(user["email"])
-        result = await run_in_threadpool(
-            request.app.state.planner.start, trip_id, body.text, user["email"], profile)
+        planner = request.app.state.planner
+        if stream:
+            return _event_stream(request, trip_id, user["email"], lambda on_event: planner.start(
+                trip_id, body.text, user["email"], profile, on_event=on_event))
+        result = await run_in_threadpool(planner.start, trip_id, body.text, user["email"], profile)
         return _trip_response(request, trip_id, result, user["email"])
 
     @app.get("/api/trips")
@@ -240,21 +322,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _saved_trip(request, trip_id, user)
 
     @app.post("/api/trips/{trip_id}/resume")
-    async def resume_trip(trip_id: str, body: TripResume, request: Request,
+    async def resume_trip(trip_id: str, body: TripResume, request: Request, stream: bool = False,
                           user: dict = Depends(rate_limited_user)):
         _owned_trip(request, trip_id, user)
-        result = await run_in_threadpool(request.app.state.planner.resume, trip_id, body.value)
+        planner = request.app.state.planner
+        if stream:
+            return _event_stream(request, trip_id, user["email"], lambda on_event: planner.resume(
+                trip_id, body.value, on_event=on_event))
+        result = await run_in_threadpool(planner.resume, trip_id, body.value)
         return _trip_response(request, trip_id, result, user["email"])
 
     @app.post("/api/trips/{trip_id}/replan")
-    async def replan_trip(trip_id: str, body: TripReplan, request: Request,
+    async def replan_trip(trip_id: str, body: TripReplan, request: Request, stream: bool = False,
                           user: dict = Depends(rate_limited_user)):
         _owned_trip(request, trip_id, user)
         if not body.reason.strip():
             raise HTTPException(status_code=400, detail="Tell me what changed.")
+        planner, reason = request.app.state.planner, body.reason.strip()[:500]
+        if stream:
+            return _event_stream(request, trip_id, user["email"], lambda on_event: planner.replan(
+                trip_id, body.from_day, reason, on_event=on_event))
         try:
-            result = await run_in_threadpool(
-                request.app.state.planner.replan, trip_id, body.from_day, body.reason.strip()[:500])
+            result = await run_in_threadpool(planner.replan, trip_id, body.from_day, reason)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         return _trip_response(request, trip_id, result, user["email"])
