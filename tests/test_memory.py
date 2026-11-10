@@ -31,7 +31,7 @@ def memory(request):
 
 # ---------------------------------------------------------------- storage
 def test_remember_recall_refresh_and_forget(memory):
-    u = f"u-{uuid.uuid4()}"
+    u = f"asha.{uuid.uuid4()}@example.com"  # real accounts are emails, which contain periods
     a = memory.remember(u, "preference", "Avoids long drives", "I hate long drives")
     memory.remember(u, "preference", "avoids  long drives!", "again")  # same, refreshed
     memory.remember(u, "trip", "3-day trip to Haridwar", extra={"towns": [HW]})

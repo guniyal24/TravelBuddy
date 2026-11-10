@@ -56,6 +56,19 @@ def test_trips_keep_created_at_and_checklist_ticks(store):
     assert store.get_trip("missing") is None
 
 
+def test_usage_totals_keep_every_column(store):
+    # SUM(...) columns share a name; a dict-row backend once merged them into one value
+    trip_id = str(uuid.uuid4())
+    assert store.trip_usage(trip_id)["runs"] == 0
+    for step in ("choose", "approve"):
+        store.record_usage(trip_id, step, {"llm_calls": 2, "tokens_in": 100, "tokens_out": 50,
+                                           "cost_usd": 0.001, "seconds": 4.0})
+    assert store.trip_usage(trip_id) == {"runs": 2, "llm_calls": 4, "tokens_in": 200,
+                                         "tokens_out": 100, "cost_usd": 0.002, "seconds": 8.0}
+    store.save_trip(trip_id, "a@x.com", _trip())
+    assert store.usage_stats()["trips"] >= 1
+
+
 @needs_pg
 def test_a_paused_trip_survives_a_restart_on_postgres():
     """Start a trip, drop the planner (a redeploy), resume with a brand-new one."""

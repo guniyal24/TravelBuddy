@@ -82,7 +82,9 @@ class TravelMemory:
 
     @staticmethod
     def _ns(user: str) -> tuple[str, str]:
-        return (NS, user)
+        # Store namespaces may not contain periods, and every email does; a hash also keeps
+        # raw emails out of the store's keys.
+        return (NS, hashlib.sha256(user.encode()).hexdigest()[:32])
 
     def remember(self, user: str, kind: str, text: str, quote: str = "",
                  trip_id: str | None = None, extra: dict | None = None) -> dict | None:

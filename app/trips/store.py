@@ -97,9 +97,12 @@ class _Postgres:
         return sql.replace("?", "%s")  # our SQL never contains a literal '?'
 
     def query(self, sql: str, params: tuple = ()) -> list[tuple]:
-        with self._pool.connection() as conn:
-            rows = conn.execute(self._sql(sql), params).fetchall()
-        return [tuple(r.values()) for r in rows]  # the pool hands out dict rows
+        # The pool hands out dict rows, which merge columns that share a name (COUNT(*),
+        # SUM(a), SUM(b) are all "sum"/"count"); positional tuples keep every column.
+        from psycopg.rows import tuple_row
+
+        with self._pool.connection() as conn, conn.cursor(row_factory=tuple_row) as cur:
+            return cur.execute(self._sql(sql), params).fetchall()
 
     def run(self, *statements: tuple[str, tuple]) -> None:
         with self._pool.connection() as conn, conn.transaction():
