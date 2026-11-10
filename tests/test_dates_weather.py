@@ -55,7 +55,7 @@ def test_start_date_sets_the_month_and_dates_the_timeline_and_itinerary():
     assert vals["request"]["month"] == 11
     days = r["prompt"]["timeline"]["days"]
     assert [d["date"] for d in days] == ["2026-11-20", "2026-11-21", "2026-11-22"]
-    assert "## Day 1 - Haridwar · Fri 20 Nov" in r["prompt"]["preview"]
+    assert "## Day 1 - Haridwar · Friday 20 Nov" in r["prompt"]["preview"]
     assert "Weather: 9-22 °C, rain 2 mm (forecast)" in r["prompt"]["preview"]
 
 
@@ -66,7 +66,7 @@ def test_weather_is_fetched_per_town_block_and_heavy_rain_warns():
     assert [(c["start_date"], c["end_date"]) for c in tools.calls] == [
         ("2026-11-12", "2026-11-12"), ("2026-11-13", "2026-11-14")]
     warn = [w for w in r["prompt"]["warnings"] if w.startswith("Weather")]
-    assert warn == ["Weather, day 2 (Fri 13 Nov, Rishikesh): heavy rain forecast (45 mm). "
+    assert warn == ["Weather, day 2 (Friday 13 Nov, Rishikesh): heavy rain forecast (45 mm). "
                     "Hill roads can close; consider re-planning from day 2."]
     assert vals["weather"]["kind"] == "forecast"
 
@@ -83,6 +83,44 @@ def test_without_dates_nothing_is_fetched():
     _, r, vals = _plan(None, tools)
     assert tools.calls == [] and vals["weather"] == {}
     assert r["prompt"]["timeline"]["days"][0]["date"] is None
+
+
+def test_a_weather_outage_is_said_not_mistaken_for_missing_dates():
+    from app.graph.trace import _end
+    from mcp_server.client import ToolError
+
+    class DownTools(WeatherTools):
+        def call(self, name, **kw):
+            if name == "get_weather":
+                raise ToolError("HTTP 429")
+            return super().call(name, **kw)
+
+    _, r, vals = _plan("2026-11-12", DownTools())
+    assert vals["weather"]["unavailable"] == 2 and vals["weather"]["days"] == []
+    assert any(w.startswith("Live weather was unavailable") for w in r["prompt"]["warnings"])
+    message, _, tone = _end("weather", vals, {"weather": vals["weather"]})
+    assert "did not respond" in message and tone == "warn"
+
+
+def test_weather_requests_retry_rate_limits_and_are_cached(monkeypatch):
+    import httpx
+
+    import mcp_server.weather as wm
+    calls = []
+
+    def fake_get(url, params=None, **kw):
+        calls.append(url)
+        status = 429 if len(calls) == 1 else 200
+        return httpx.Response(status, json={"daily": {}}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(wm.httpx, "get", fake_get)
+    monkeypatch.setattr(wm.time, "sleep", lambda s: None)
+    monkeypatch.setattr(wm, "_cache", {})
+    params = {"latitude": 1, "longitude": 2}
+    assert wm._fetch(wm.FORECAST, params) == {"daily": {}}
+    assert len(calls) == 2  # one 429, then success
+    wm._fetch(wm.FORECAST, params)
+    assert len(calls) == 2  # second call served from the cache
 
 
 def test_a_past_date_from_the_model_is_dropped():

@@ -85,3 +85,17 @@ UK_BBOX = (28.7, 31.5, 77.5, 81.1)  # lat_min, lat_max, lon_min, lon_max
 
 def in_uttarakhand(lat: float, lon: float) -> bool:
     return UK_BBOX[0] <= lat <= UK_BBOX[1] and UK_BBOX[2] <= lon <= UK_BBOX[3]
+
+
+# Guide pages sometimes wrap a paragraph in a listing ("Temples nearby", "Other cafes"): a
+# heading, not a place a traveller can visit, so it is never offered as a stop.
+_GENERIC_NAME = re.compile(
+    r"^(?:(?:other|more|various|several|nearby|local|some)\s+)?"
+    r"(?:temples?|shrines?|cafes?|restaurants?|eateries|dhabas?|hotels?|stays?|ghats?|markets?|"
+    r"shops?|treks?|walks?|viewpoints?|places|attractions|sights|things to (?:see|do))"
+    r"(?:\s+(?:nearby|near by|around|in town|in the area|etc\.?))?$", re.IGNORECASE)
+
+
+def is_generic_name(name: str) -> bool:
+    """True for a heading-like name ("Temples Nearby") rather than one real place."""
+    return bool(_GENERIC_NAME.match(" ".join((name or "").split())))

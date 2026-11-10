@@ -1,8 +1,15 @@
 """Readiness check: which service is down, without leaking secrets or running up costs."""
 from types import SimpleNamespace
 
+import pytest
+
 from app.api.deps_health import DepsHealth, build_checks, describe_error, run_checks
 from app.trips.store import TripStore
+
+
+@pytest.fixture(autouse=True)
+def no_real_weather_calls(monkeypatch):
+    monkeypatch.setattr("mcp_server.weather.fetch_uncached", lambda *a, **kw: {})
 
 
 class Unauthorized(Exception):
@@ -38,7 +45,7 @@ def test_all_services_up():
     planner, trips, _ = services()
     result = run_checks(build_checks(planner, trips))
     assert result["ok"] is True
-    assert set(result["checks"]) == {"database", "graph", "vector_index", "embeddings", "llm"}
+    assert set(result["checks"]) == {"database", "graph", "vector_index", "embeddings", "llm", "weather"}
     assert result["checks"]["vector_index"]["vectors"] == 721
     assert result["checks"]["embeddings"]["dim"] == 1024
 
@@ -83,3 +90,10 @@ def test_endpoint_reports_503_when_a_service_is_down(client):
     client.app.state.planner, client.app.state.trips = planner, trips
     r = client.get("/health/deps")
     assert r.status_code == 503 and r.json()["checks"]["vector_index"]["ok"] is False
+
+
+def test_http_errors_report_their_status(monkeypatch):
+    import httpx
+    req = httpx.Request("GET", "https://api.open-meteo.com/v1/forecast")
+    err = httpx.HTTPStatusError("x", request=req, response=httpx.Response(429, request=req))
+    assert describe_error(err) == "HTTPStatusError (HTTP 429)"

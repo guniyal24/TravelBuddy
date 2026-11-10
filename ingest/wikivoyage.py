@@ -17,6 +17,7 @@ from ingest.schema import (
     Source,
     Tier,
     in_uttarakhand,
+    is_generic_name,
     make_id,
 )
 
@@ -88,7 +89,7 @@ def parse_listings(
             return _clean(_node.get(key).value) if _node.has(key) else ""
 
         name = param("name")
-        if not name:
+        if not name or is_generic_name(name):  # "Temples nearby" is a heading, not a place
             continue
         etype = LISTING_TYPES[tname]
         eid = make_id(etype, destination_name, name)

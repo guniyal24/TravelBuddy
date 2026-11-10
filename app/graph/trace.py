@@ -206,6 +206,9 @@ def _end(node: str, state: dict, out: dict) -> tuple[str, list[str], str] | None
     if node == "weather":
         w = out.get("weather") or {}
         days = w.get("days") or []
+        if not days and w.get("unavailable"):
+            return ("The weather service did not respond, so no forecast this time", [],
+                    "warn")
         if not days:
             return "No travel dates given, so no forecast (add dates for live weather)", [], "info"
         heavy = [x for x in days if x.get("kind") == "forecast"

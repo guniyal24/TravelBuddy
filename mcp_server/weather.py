@@ -1,5 +1,8 @@
 """Weather via Open-Meteo (free, no key). Forecast when the dates are within 16 days,
 otherwise the same dates one year earlier as a rough "typical" guide (clearly labelled)."""
+import json
+import threading
+import time
 from datetime import date, timedelta
 
 import httpx
@@ -8,12 +11,43 @@ FORECAST = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
 DAILY = "temperature_2m_max,temperature_2m_min,precipitation_sum"
 MAX_FORECAST_DAYS = 16
+CACHE_SECONDS = 3600  # a forecast does not change much within an hour
+RETRY_STATUS = {429, 500, 502, 503, 504}
+
+_cache: dict[str, tuple[float, dict]] = {}
+_cache_lock = threading.Lock()
+
+
+def fetch_uncached(url: str, params: dict, attempts: int = 3, pause: float = 1.0) -> dict:
+    """GET with retries: Open-Meteo rate-limits busy shared IPs (cloud hosts) with 429."""
+    for attempt in range(attempts):
+        try:
+            r = httpx.get(url, params=params, timeout=15,
+                          headers={"User-Agent": "TravelBuddy/1.0"})
+            if r.status_code not in RETRY_STATUS or attempt == attempts - 1:
+                r.raise_for_status()
+                return r.json()
+        except httpx.TransportError:
+            if attempt == attempts - 1:
+                raise
+        time.sleep(pause * 2 ** attempt)
+    raise RuntimeError("unreachable")
 
 
 def _fetch(url: str, params: dict) -> dict:
-    r = httpx.get(url, params=params, timeout=20, headers={"User-Agent": "UttarakhandPlanner/0.1"})
-    r.raise_for_status()
-    return r.json()
+    """Cached for an hour per (url, params), so repeated plans for the same town and dates
+    make one request."""
+    key = url + json.dumps(params, sort_keys=True)
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and time.monotonic() - hit[0] < CACHE_SECONDS:
+            return hit[1]
+    data = fetch_uncached(url, params)
+    with _cache_lock:
+        if len(_cache) > 2000:  # bounded: drop everything rather than grow forever
+            _cache.clear()
+        _cache[key] = (time.monotonic(), data)
+    return data
 
 
 def get_weather(lat: float, lon: float, start: date, end: date, today: date | None = None,
