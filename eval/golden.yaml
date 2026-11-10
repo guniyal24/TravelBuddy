@@ -1,0 +1,97 @@
+# Golden questions. `expected_any`: at least one of these ids should be retrieved/used.
+# kind: answerable -> the data covers it; unanswerable -> the bot should decline, not invent.
+# The KB covers 11 destinations (see data/seeds/destinations.yaml); unanswerable questions must
+# stay outside that coverage or ask for facts the data does not hold (times, fares, permits).
+questions:
+  # --- attractions ---
+  - {id: q01, kind: answerable, category: attraction,
+     query: "What are the main temples to visit in Haridwar?",
+     expected_any: [attraction_haridwar_mansa_devi_temple, attraction_haridwar_chandi_devi_temple, attraction_haridwar_maya_devi_temple]}
+  - {id: q02, kind: answerable, category: attraction,
+     query: "Where do the evening Ganga aarti crowds gather in Haridwar?",
+     expected_any: [attraction_haridwar_har_ki_pauri]}
+  - {id: q03, kind: answerable, category: attraction,
+     query: "Which ashram did the Beatles stay at in Rishikesh?",
+     expected_any: [attraction_rishikesh_chaurasi_kutia]}
+  - {id: q04, kind: answerable, category: attraction,
+     query: "Is there a suspension bridge in Rishikesh I can walk across?",
+     expected_any: [attraction_rishikesh_janki_setu]}
+  - {id: q05, kind: answerable, category: attraction,
+     query: "I want a short trek to a waterfall near Rishikesh",
+     expected_any: [attraction_rishikesh_patna_waterfalls]}
+  - {id: q06, kind: answerable, category: attraction,
+     query: "Can I take a cable car to a temple in Haridwar?",
+     expected_any: [attraction_haridwar_mansa_devi_temple]}
+  # --- food ---
+  - {id: q07, kind: answerable, category: food,
+     query: "Where can I eat chole kulche in Haridwar?",
+     expected_any: [eatery_haridwar_sushanto_choley_kulche_wala, eatery_haridwar_bhagwati_chole_wala]}
+  - {id: q08, kind: answerable, category: food,
+     query: "Where can I get puri sabzi and halwa near Har Ki Pauri?",
+     expected_any: [eatery_haridwar_mohan_puri]}
+  - {id: q09, kind: answerable, category: food,
+     query: "Good South Indian food in Haridwar?",
+     expected_any: [eatery_haridwar_kwality_mysore_restaurant, eatery_haridwar_dosa_plaza]}
+  - {id: q10, kind: answerable, category: food,
+     query: "Which cafe in Rishikesh is known for spinach pie?",
+     expected_any: [eatery_rishikesh_german_bakery_in_tapovan]}
+  - {id: q11, kind: answerable, category: food,
+     query: "Any Bengali food in Haridwar?",
+     expected_any: [eatery_haridwar_dada_boudir_hotel, eatery_haridwar_mashir_hotel, eatery_haridwar_deluxe_dada_boudir_hotel]}
+  - {id: q12, kind: answerable, category: food,
+     query: "What is Bhatt ki Churkani?",
+     expected_any: [dish_uttarakhand_bhatt_ki_churkani]}
+  - {id: q13, kind: answerable, category: food,
+     query: "Which traditional sweet dish is made from barnyard millet?",
+     expected_any: [dish_uttarakhand_jhangora_ki_kheer]}
+  # --- activities ---
+  - {id: q14, kind: answerable, category: activity,
+     query: "Where can I learn sitar or tabla in Rishikesh?",
+     expected_any: [activity_rishikesh_pankaj_music_school, activity_rishikesh_bhuwan_chandra_music_school_store]}
+  - {id: q15, kind: answerable, category: activity,
+     query: "Where can I see elephants and leopards near Haridwar?",
+     expected_any: [activity_haridwar_rajaji_national_park]}
+  - {id: q16, kind: answerable, category: activity,
+     query: "I want Ayurveda and Panchakarma treatment in Rishikesh",
+     expected_any: [activity_rishikesh_chakra_ayurvedic_wellness, activity_rishikesh_divine_school_of_ayurveda]}
+  - {id: q17, kind: answerable, category: activity,
+     query: "Are there free yoga classes or music concerts in Rishikesh?",
+     expected_any: [activity_rishikesh_yoga_and_music_festival]}
+  # --- stays ---
+  - {id: q18, kind: answerable, category: stay,
+     query: "Suggest budget hotels in Haridwar",
+     expected_any: [stay_haridwar_hotel_golden, stay_haridwar_hotel_haridwar_residency, stay_haridwar_hotel_ganga_azure]}
+  - {id: q19, kind: answerable, category: stay,
+     query: "Where can I stay in Rishikesh near the Ganga on a budget?",
+     expected_any: [stay_rishikesh_hotel_ganga_kinare]}
+  - {id: q20, kind: answerable, category: stay,
+     query: "Any ashram or dharamshala stays in Haridwar?",
+     expected_any: [stay_haridwar_shri_ram_sharnam_ashram, stay_haridwar_jhakad_dharam_sala]}
+
+  # --- new destinations (added with the 11-destination data set) ---
+  - {id: q21, kind: answerable, category: attraction,
+     query: "Which lake in Nainital is the main attraction for boating?",
+     expected_any: [attraction_nainital_naina_lake]}
+  - {id: q22, kind: answerable, category: attraction,
+     query: "Is there a waterfall near Mussoorie I can visit?",
+     expected_any: [attraction_mussoorie_camty_fall]}
+  - {id: q23, kind: answerable, category: attraction,
+     query: "What is the famous clock tower in Dehradun?",
+     expected_any: [attraction_dehradun_clock_tower]}
+  - {id: q24, kind: answerable, category: attraction,
+     query: "Which waterfall can I visit near Badrinath?",
+     expected_any: [attraction_badrinath_vasudhara_falls]}
+  - {id: q25, kind: answerable, category: attraction,
+     query: "Is there a garden to visit in Ranikhet?",
+     expected_any: [attraction_ranikhet_chaubatia_garden]}
+  # --- unanswerable: outside the data; the bot must decline rather than invent ---
+  - {id: u01, kind: unanswerable, category: out_of_coverage,
+     query: "Suggest a good homestay in Munsiyari with a Panchachuli view"}
+  - {id: u02, kind: unanswerable, category: out_of_coverage,
+     query: "What time does the Kedarnath helicopter service start and how much does it cost?"}
+  - {id: u03, kind: unanswerable, category: out_of_coverage,
+     query: "Which bus leaves Delhi ISBT for Mussoorie at 6am and what is the fare?"}
+  - {id: u04, kind: unanswerable, category: out_of_coverage,
+     query: "Which resort in Lansdowne has a swimming pool and what are its rates?"}
+  - {id: u05, kind: unanswerable, category: out_of_coverage,
+     query: "What is the exact entry fee and permit process for Valley of Flowers?"}

@@ -1,0 +1,21 @@
+# Render blueprint: a Docker web service. Set the secrets in the Render dashboard.
+services:
+  - type: web
+    name: uttarakhand-planner-api
+    runtime: docker
+    healthCheckPath: /health
+    # Trip state is stored in SQLite at CHECKPOINT_PATH. Free instances have ephemeral disks, so
+    # in-progress trips are lost on redeploy. On a paid plan, mount a disk and point there:
+    # disk: {name: trips, mountPath: /srv/data/state, sizeGB: 1}
+    # then set CHECKPOINT_PATH=/srv/data/state/checkpoints.sqlite
+    # and TRIPS_PATH=/srv/data/state/trips.sqlite (saved trips, profiles, checklist ticks)
+    envVars:
+      - {key: SECRET_KEY, generateValue: true}
+      - {key: DEEPINFRA_API_KEY, sync: false}
+      - {key: PINECONE_API_KEY, sync: false}
+      - {key: PINECONE_INDEX_NAME, value: uttarakhand-trip-planner}
+      - {key: NEO4J_URI, sync: false}
+      - {key: NEO4J_USER, sync: false}
+      - {key: NEO4J_PASSWORD, sync: false}
+      - {key: NEO4J_DATABASE, value: neo4j}
+      - {key: CORS_ORIGINS, sync: false}

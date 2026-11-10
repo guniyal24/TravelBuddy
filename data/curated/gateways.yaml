@@ -1,0 +1,44 @@
+# Entry points into Uttarakhand. Codes are from author knowledge and must be verified before
+# release (confidence: curated_unverified). Road distances / times are NOT stored here: they
+# are computed from a routing tool in Phase 3.
+gateways:
+  - id: gateway_dehradun_jolly_grant_airport
+    name: Dehradun (Jolly Grant) Airport
+    mode: air
+    code: DED
+    serves: [destination_rishikesh, destination_haridwar, destination_dehradun, destination_mussoorie, destination_auli, destination_kedarnath, destination_badrinath]
+  - id: gateway_haridwar_junction
+    name: Haridwar Junction
+    mode: rail
+    code: HW
+    serves: [destination_haridwar, destination_rishikesh]
+  - id: gateway_yog_nagari_rishikesh_station
+    name: Yog Nagari Rishikesh Railway Station
+    mode: rail
+    code: YNRK
+    serves: [destination_rishikesh]
+  - id: gateway_dehradun_station
+    name: Dehradun Railway Station
+    mode: rail
+    code: DDN
+    serves: [destination_dehradun, destination_mussoorie, destination_rishikesh]
+  - id: gateway_kathgodam_station
+    name: Kathgodam Railway Station
+    mode: rail
+    code: KGM
+    serves: [destination_nainital, destination_almora, destination_ranikhet]
+  - id: gateway_ramnagar_station
+    name: Ramnagar Railway Station
+    mode: rail
+    code: RMR
+    serves: [destination_jim_corbett]
+  - id: gateway_kotdwar_station
+    name: Kotdwar Railway Station
+    mode: rail
+    code: KTW
+    serves: [destination_jim_corbett]
+  - id: gateway_pantnagar_airport
+    name: Pantnagar Airport
+    mode: air
+    code: PGH
+    serves: [destination_nainital, destination_jim_corbett, destination_almora]

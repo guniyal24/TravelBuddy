@@ -1,0 +1,35 @@
+# Hand-curated regional dishes. confidence = curated_unverified until checked against a
+# cited source. Regions only, no restaurant claims.
+dishes:
+  - name: Aloo ke Gutke
+    regions: [Kumaon, Garhwal]
+    veg: true
+    description: Spiced boiled potatoes tempered with jakhya or dried red chillies, a common hill side dish.
+  - name: Bhatt ki Churkani
+    regions: [Garhwal, Kumaon]
+    veg: true
+    description: Black soybean curry slow-cooked in an iron pot, a staple of Garhwali home cooking.
+  - name: Kafuli
+    regions: [Garhwal]
+    veg: true
+    description: Thick green gravy of spinach and fenugreek leaves, usually eaten with rice.
+  - name: Chainsoo
+    regions: [Garhwal]
+    veg: true
+    description: Curry made from roasted and ground black gram.
+  - name: Jhangora ki Kheer
+    regions: [Garhwal]
+    veg: true
+    description: Sweet pudding made from barnyard millet.
+  - name: Bal Mithai
+    regions: [Kumaon]
+    veg: true
+    description: Brown fudge-like sweet coated with sugar balls, associated with Almora.
+  - name: Singori
+    regions: [Kumaon]
+    veg: true
+    description: Khoya sweet wrapped in a maalu leaf, associated with Almora.
+  - name: Arsa
+    regions: [Garhwal]
+    veg: true
+    description: Sweet rice-flour and jaggery fritter served at festivals.

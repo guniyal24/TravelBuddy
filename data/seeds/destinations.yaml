@@ -1,0 +1,24 @@
+# Destinations to ingest. Add a block and re-run `python -m ingest.build` to extend coverage.
+# lat/lon are approximate centre points used as a fallback; elevation is fetched from Open-Meteo.
+destinations:
+  - id: destination_haridwar
+    name: Haridwar
+    wikivoyage_page: Haridwar
+    region: Garhwal
+    lat: 29.9457
+    lon: 78.1642
+  - id: destination_rishikesh
+    name: Rishikesh
+    wikivoyage_page: Rishikesh
+    region: Garhwal
+    lat: 30.0869
+    lon: 78.2676
+  - {id: destination_dehradun, name: Dehradun, wikivoyage_page: Dehradun, region: Garhwal, lat: 30.3165, lon: 78.0322}
+  - {id: destination_mussoorie, name: Mussoorie, wikivoyage_page: Mussoorie, region: Garhwal, lat: 30.4598, lon: 78.0644}
+  - {id: destination_nainital, name: Nainital, wikivoyage_page: Nainital, region: Kumaon, lat: 29.3919, lon: 79.4542}
+  - {id: destination_jim_corbett, name: Jim Corbett, wikivoyage_page: Jim Corbett National Park, region: Kumaon, lat: 29.5300, lon: 78.7747}
+  - {id: destination_auli, name: Auli, wikivoyage_page: Auli, region: Garhwal, lat: 30.5267, lon: 79.5667}
+  - {id: destination_kedarnath, name: Kedarnath, wikivoyage_page: Kedarnath, region: Garhwal, lat: 30.7352, lon: 79.0669}
+  - {id: destination_badrinath, name: Badrinath, wikivoyage_page: Badrinath, region: Garhwal, lat: 30.7433, lon: 79.4938}
+  - {id: destination_almora, name: Almora, wikivoyage_page: Almora, region: Kumaon, lat: 29.5971, lon: 79.6591}
+  - {id: destination_ranikhet, name: Ranikhet, wikivoyage_page: Ranikhet, region: Kumaon, lat: 29.6434, lon: 79.4322}

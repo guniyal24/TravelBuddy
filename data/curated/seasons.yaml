@@ -1,0 +1,59 @@
+# Seasonality per destination. confidence: curated_unverified until checked against official
+# sources (Uttarakhand Tourism, IMD, district administration). Months are 1-12.
+# status per month: avoid | caution | (absent = fine). Unlisted destinations return "unknown".
+destinations:
+  destination_haridwar:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {4: "very hot", 5: "very hot", 6: "very hot", 7: "monsoon; Kanwar Yatra crowds and traffic restrictions are common", 8: "monsoon rain", 9: "monsoon rain"}
+    best_months: [10, 11, 12, 1, 2, 3]
+  destination_rishikesh:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {5: "hot", 6: "hot; rafting may be suspended from late June", 7: "monsoon; river rafting is usually suspended", 8: "monsoon; river rafting is usually suspended", 9: "monsoon tail; rafting usually reopens mid-September"}
+    best_months: [10, 11, 12, 1, 2, 3, 4]
+  destination_dehradun:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {5: "hot", 6: "hot", 7: "monsoon rain", 8: "monsoon rain"}
+    best_months: [10, 11, 2, 3, 4]
+  destination_mussoorie:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "heavy monsoon rain, landslides and fog are common", 8: "heavy monsoon rain, landslides and fog are common", 12: "cold; occasional snow", 1: "cold; occasional snow"}
+    best_months: [3, 4, 5, 6, 9, 10, 11]
+  destination_nainital:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain and landslides", 8: "monsoon rain and landslides", 1: "very cold", 5: "peak-season crowds and traffic", 6: "peak-season crowds and traffic"}
+    best_months: [3, 4, 9, 10, 11]
+  destination_jim_corbett:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "core safari zones are usually closed for the monsoon", 8: "core safari zones are usually closed for the monsoon", 9: "core safari zones are usually closed for the monsoon", 10: "core safari zones usually reopen mid-November; limited zones before that", 6: "very hot; park usually closes mid-June"}
+    best_months: [11, 12, 1, 2, 3, 4]
+  destination_auli:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon; landslides on the Joshimath road", 8: "monsoon; landslides on the Joshimath road", 9: "monsoon tail; landslide risk"}
+    best_months: [1, 2, 3, 4, 5, 6, 10, 11]
+  destination_kedarnath:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {1: "temple closed for winter and the trek is under snow", 2: "temple closed for winter and the trek is under snow", 3: "temple closed for winter and the trek is under snow", 4: "temple usually opens late April or May; snow on the trek", 7: "monsoon; landslides and trek closures are common", 8: "monsoon; landslides and trek closures are common", 11: "temple usually closes early November", 12: "temple closed for winter and the trek is under snow"}
+    best_months: [5, 6, 9, 10]
+  destination_badrinath:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {1: "temple closed for winter; heavy snow", 2: "temple closed for winter; heavy snow", 3: "temple closed for winter; heavy snow", 4: "temple usually opens late April or May", 7: "monsoon; landslides on the highway", 8: "monsoon; landslides on the highway", 11: "temple usually closes in November", 12: "temple closed for winter; heavy snow"}
+    best_months: [5, 6, 9, 10]
+  destination_almora:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain and landslides", 8: "monsoon rain and landslides", 1: "cold; occasional snow"}
+    best_months: [3, 4, 5, 6, 9, 10, 11]
+  destination_ranikhet:
+    confidence: curated_unverified
+    last_verified: null
+    caution_months: {7: "monsoon rain and landslides", 8: "monsoon rain and landslides", 1: "cold; occasional snow"}
+    best_months: [3, 4, 5, 6, 9, 10, 11]

@@ -1,0 +1,38 @@
+# Road links between origin cities and Uttarakhand destinations, and between destinations.
+# km / hours are approximate author estimates (confidence: curated_unverified) taken from
+# common road distances; hours are (low, high) for a normal day and exclude breaks and jams.
+# Departure times are deliberately NOT stored: they change and must come from the operator
+# (Uttarakhand Transport Corporation: https://utconline.uk.gov.in , IRCTC for trains).
+# Fares are computed from per-km assumptions in app/transport/routes.py and labelled as such.
+confidence: curated_unverified
+sources:
+  bus: https://utconline.uk.gov.in
+  rail: https://www.irctc.co.in
+cities:
+  city_delhi: Delhi
+routes:
+  # --- from Delhi (road; direct trains also run to the rail heads listed) ---
+  - {a: city_delhi, b: destination_haridwar,    km: 215, hours: [5, 6.5],  rail: HW}
+  - {a: city_delhi, b: destination_rishikesh,   km: 240, hours: [6, 7.5],  rail: YNRK, note: "Rail head Haridwar (HW) is more served; Yog Nagari Rishikesh has fewer trains."}
+  - {a: city_delhi, b: destination_dehradun,    km: 250, hours: [5.5, 7],  rail: DDN}
+  - {a: city_delhi, b: destination_mussoorie,   km: 290, hours: [7, 9],    rail: DDN, note: "Reach Dehradun first, then 35 km uphill."}
+  - {a: city_delhi, b: destination_nainital,    km: 305, hours: [7, 9],    rail: KGM, note: "Rail head Kathgodam, then 35 km uphill."}
+  - {a: city_delhi, b: destination_jim_corbett, km: 240, hours: [6, 7.5],  rail: RMR, note: "Rail head Ramnagar; safari gates are 15-80 km further, by zone."}
+  - {a: city_delhi, b: destination_almora,      km: 370, hours: [9, 11],   rail: KGM}
+  - {a: city_delhi, b: destination_ranikhet,    km: 350, hours: [8.5, 10.5], rail: KGM}
+  # --- between destinations ---
+  - {a: destination_haridwar,  b: destination_rishikesh, km: 25,  hours: [0.75, 1.25]}
+  - {a: destination_haridwar,  b: destination_dehradun,  km: 55,  hours: [1.5, 2.5]}
+  - {a: destination_rishikesh, b: destination_dehradun,  km: 45,  hours: [1, 2]}
+  - {a: destination_dehradun,  b: destination_mussoorie, km: 35,  hours: [1.25, 2]}
+  - {a: destination_rishikesh, b: destination_mussoorie, km: 80,  hours: [2.5, 3.5]}
+  - {a: destination_haridwar,  b: destination_mussoorie, km: 90,  hours: [2.5, 3.5]}
+  - {a: destination_nainital,  b: destination_almora,    km: 67,  hours: [2, 3]}
+  - {a: destination_nainital,  b: destination_ranikhet,  km: 60,  hours: [2, 3]}
+  - {a: destination_almora,    b: destination_ranikhet,  km: 50,  hours: [1.5, 2.5]}
+  - {a: destination_nainital,  b: destination_jim_corbett, km: 65, hours: [2, 3]}
+  - {a: destination_rishikesh, b: destination_auli,      km: 270, hours: [9, 11], note: "Via Joshimath on a landslide-prone highway; Auli is about 14 km above Joshimath."}
+  - {a: destination_rishikesh, b: destination_kedarnath, km: 220, hours: [9, 11], note: "Road ends at Sonprayag/Gaurikund; Kedarnath is then about 16-18 km on foot, by pony or by helicopter."}
+  - {a: destination_rishikesh, b: destination_badrinath, km: 295, hours: [11, 13], note: "One-way traffic windows apply on parts of the highway."}
+  - {a: destination_kedarnath, b: destination_badrinath, km: 240, hours: [10, 12], note: "From the Sonprayag road head, via Chopta/Joshimath."}
+  - {a: destination_auli,      b: destination_badrinath, km: 60,  hours: [2.5, 3.5]}

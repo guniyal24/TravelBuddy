@@ -1,0 +1,25 @@
+# Runtime
+fastapi
+uvicorn[standard]
+pydantic>=2
+pydantic-settings
+email-validator
+python-multipart
+python-jose[cryptography]
+bcrypt
+httpx
+python-dotenv
+
+# Data stores / retrieval
+neo4j>=5.9
+pinecone>=3.0
+redis
+openai>=1.0
+flashrank
+tqdm
+mwparserfromhell
+pyyaml
+mcp>=2
+langgraph
+langgraph-checkpoint-sqlite
+fpdf2>=2.8

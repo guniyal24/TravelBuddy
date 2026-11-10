@@ -1,0 +1,40 @@
+# Standing advisories per destination, by month. These are general, recurring conditions, NOT
+# live road status. confidence: curated_unverified until checked against the official pages.
+# Live status must be confirmed on the linked official sources before travel.
+confidence: curated_unverified
+official:
+  disaster: {name: "Uttarakhand State Disaster Management Authority", url: "https://sdma.uk.gov.in"}
+  charDham: {name: "Char Dham yatra registration (mandatory)", url: "https://registrationandtouristcare.uk.gov.in"}
+  roads: {name: "Uttarakhand Police traffic and road updates", url: "https://uttarakhandpolice.uk.gov.in"}
+destinations:
+  destination_kedarnath:
+    - {months: all, text: "Char Dham yatra registration is mandatory for pilgrims; register online before you travel. Helicopter and pony services are booked separately.", link: charDham}
+    - {months: [5, 6, 9, 10], text: "Yatra registration is mandatory and daily pilgrim numbers can be capped. Register before travelling.", link: charDham}
+    - {months: [7, 8], text: "Heavy monsoon rain: the Gaurikund-Kedarnath trek and the highway are often closed after landslides. Keep spare days.", link: disaster}
+    - {months: [11, 12, 1, 2, 3, 4], text: "The shrine is closed in winter (it reopens around late April or May). Plan another destination.", link: charDham}
+  destination_badrinath:
+    - {months: all, text: "Char Dham yatra registration is mandatory for pilgrims; register online before you travel.", link: charDham}
+    - {months: [5, 6, 9, 10], text: "Yatra registration is mandatory. Parts of the highway run on one-way traffic windows, so allow extra time.", link: charDham}
+    - {months: [7, 8], text: "Landslide-prone highway in the monsoon; closures of several hours to days are common.", link: roads}
+    - {months: [11, 12, 1, 2, 3, 4], text: "The shrine is closed in winter. Plan another destination.", link: charDham}
+  destination_auli:
+    - {months: [7, 8, 9], text: "The Rishikesh-Joshimath highway is prone to landslides in the monsoon. Check road status the day before.", link: roads}
+    - {months: [12, 1, 2, 3], text: "Snow is likely, and skiing depends on that season's snowfall. Carry heavy woollens.", link: disaster}
+  destination_jim_corbett:
+    - {months: [7, 8, 9, 10], text: "Core safari zones are usually closed in the monsoon; only buffer zones may be open. Check zone status when booking.", link: disaster}
+    - {months: [11, 12, 1, 2, 3, 4, 5, 6], text: "Safari slots are limited per day and sell out early. Book permits on the official park site in advance.", link: disaster}
+  destination_nainital:
+    - {months: [5, 6, 12], text: "Peak tourist rush: expect traffic on the Kathgodam road and high room prices; book early.", link: roads}
+    - {months: [7, 8], text: "Landslides can block the hill roads during heavy rain.", link: roads}
+  destination_mussoorie:
+    - {months: [7, 8], text: "Heavy rain and fog; landslides can block the Dehradun-Mussoorie road.", link: roads}
+    - {months: [12, 1, 2], text: "Cold with fog; occasional snowfall can close roads.", link: roads}
+  destination_almora:
+    - {months: [7, 8], text: "Landslides are common on the Kumaon hill roads in the monsoon.", link: roads}
+  destination_ranikhet:
+    - {months: [7, 8], text: "Landslides are common on the Kumaon hill roads in the monsoon.", link: roads}
+  destination_haridwar:
+    - {months: [7], text: "Kanwar Yatra: heavy crowds, and traffic restrictions around Haridwar and Rishikesh are common for about two weeks.", link: roads}
+  destination_rishikesh:
+    - {months: [7], text: "Kanwar Yatra: heavy crowds and traffic restrictions are common.", link: roads}
+    - {months: [7, 8, 9], text: "River rafting is usually suspended in the monsoon.", link: disaster}
