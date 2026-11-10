@@ -30,6 +30,8 @@ Tables are created automatically on the API's first start.
    | `DATABASE_URL` | the Neon string from step 1 |
    | `DEEPINFRA_API_KEY`, `PINECONE_API_KEY`, `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` | same as your `.env` |
    | `CORS_ORIGINS` | leave as `http://localhost:5173` for now; set in step 4 |
+   | `GOOGLE_PLACES_API_KEY` | optional: hotel reviews in the Concierge step (billable, capped by `PLACES_DAILY_CAP`) |
+   | `TAVILY_API_KEY` | optional: live travel notes (free tier at tavily.com) |
 
 3. Deploy, then open `https://<your-service>.onrender.com/health`. It should return
    `{"status":"ok"}`.

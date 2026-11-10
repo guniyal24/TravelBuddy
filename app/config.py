@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     chat_model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
     # reasoning/planner: fast Mistral-Small; judge: pinned 70B so eval scores stay comparable
     reasoning_model: str = "mistralai/Mistral-Small-3.2-24B-Instruct-2506"
+    # Concierge stage after approval: Google reviews per hotel (needs GOOGLE_PLACES_API_KEY)
+    # and web travel notes (needs TAVILY_API_KEY). Either part is skipped without its key.
+    concierge_enabled: bool = True
     judge_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
     # Eval jury (judge v2): three model families, none from the generator's (Mistral) family,
     # so no judge grades its own family's writing. Pinned so scores stay comparable over time.

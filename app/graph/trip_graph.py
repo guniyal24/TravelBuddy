@@ -19,11 +19,12 @@ import logging
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, TypedDict
+from copy import deepcopy
+from typing import Annotated, Any, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, Send, interrupt
 
 from app.booking.links import build_booking_links, render_links
 from app.cost.pricing import parse_price_range
@@ -33,6 +34,7 @@ from app.graph.agents import (
     StayAgent,
     TransportAgent,
 )
+from app.graph.concierge import HotelAgent, TravelInfoAgent
 from app.graph.critic import fallback_plan, validate_plan
 from app.graph.render import render_itinerary
 from app.graph.schedule import build_timeline
@@ -177,6 +179,16 @@ PLAN_SYSTEM = (
 )
 
 
+RESET = "__reset__"
+
+
+def _collect(old: list | None, new) -> list:
+    """Reducer for parallel hotel agents: each appends its town; RESET starts a new round."""
+    if new == RESET:
+        return []
+    return [*(old or []), *(new or [])]
+
+
 class TripState(TypedDict, total=False):
     user_text: str
     request: dict
@@ -208,12 +220,19 @@ class TripState(TypedDict, total=False):
     replan_from: int
     structured: dict
     status: str  # running | done | cancelled
+    # Concierge stage (after approval)
+    hotel_findings: Annotated[list, _collect]  # one entry per overnight town, in parallel
+    travel: dict  # web-search travel notes
+    concierge: dict  # ranked hotels per town + travel notes, shown for the hotel choice
+    hotels_msg: str
+    hotel_choice: dict  # {destination id: chosen stay id}
 
 
 class TripPlanner:
     def __init__(self, llm, retriever, store, small_model: str, big_model: str,
-                 checkpointer=None, tools=None):
+                 checkpointer=None, tools=None, concierge: bool = False):
         self.llm, self.retriever, self.store = llm, retriever, store
+        self.concierge = concierge  # research hotels and travel info after approval
         self.small, self.big = small_model, big_model
         self.tools = tools or LocalTools()  # LocalTools (direct) or MCPTools (via MCP)
         self.graph = self._build(checkpointer or MemorySaver())
@@ -595,10 +614,85 @@ class TripPlanner:
     def _route_after_approve(self, state: TripState) -> str:
         action = state["decision"].get("action")
         if action == "approve":
-            return "finalize"
+            return "concierge" if self.concierge else "finalize"
         if action == "cancel" or state.get("edits", 0) >= MAX_EDITS:
             return "cancel"
         return "edit"
+
+    # ---------------- concierge (after approval) ----------------
+    def _concierge(self, state: TripState) -> TripState:
+        return {"hotel_findings": RESET, "travel": {}, "hotel_choice": {}}
+
+    def _dispatch_concierge(self, state: TripState) -> list[Send]:
+        """Fan out: one hotel agent per overnight town, plus the travel-info agent, all in
+        parallel (LangGraph runs every Send of a step concurrently)."""
+        req, plan = state["request"], state["plan"]
+        nights: dict[str, dict] = {}
+        for d in plan["days"]:
+            if d["day"] < req["days"]:
+                n = nights.setdefault(d["destination"], {"nights": 0, "current": d.get("stay")})
+                n["nights"] += 1
+        sends = []
+        for dest, info in nights.items():
+            town = DESTINATIONS[dest]
+            stays = ((state.get("candidates") or {}).get(dest) or {}).get("stays") or []
+            sends.append(Send("hotel_research", {
+                "dest": dest, "town": {k: town[k] for k in ("name", "lat", "lon")},
+                "stays": stays, "request": req, "current": info["current"],
+                "nights": info["nights"]}))
+        towns = [DESTINATIONS[d]["name"] for d in dict.fromkeys(x["destination"]
+                                                                for x in plan["days"])]
+        sends.append(Send("travel_info", {"towns": towns, "month": req.get("month")}))
+        return sends
+
+    def _hotel_research(self, payload: dict) -> TripState:
+        found = HotelAgent(self.tools, self.llm, self.small).research(
+            payload["dest"], payload["town"], payload["stays"], payload["request"],
+            payload["current"])
+        return {"hotel_findings": [{**found, "nights": payload["nights"]}]}
+
+    def _travel_info(self, payload: dict) -> TripState:
+        return {"travel": TravelInfoAgent(self.tools, self.llm, self.small).notes(
+            payload["towns"], payload["month"])}
+
+    def _rank_hotels(self, state: TripState) -> TripState:
+        order = list(dict.fromkeys(d["destination"] for d in state["plan"]["days"]))
+        towns = sorted(state.get("hotel_findings") or [],
+                       key=lambda t: order.index(t["dest"]) if t["dest"] in order else 99)
+        return {"concierge": {"towns": towns, "travel": state.get("travel") or {}},
+                "hotels_msg": self._loc(state, "Here is what guests say about the hotels. Pick "
+                                        "one for each town, or keep the ones in your plan.")}
+
+    def _choose_hotels(self, state: TripState) -> TripState:
+        towns = state["concierge"]["towns"]
+        if not any(len(t["options"]) > 1 or t["options"] and t["options"][0]["reviews"]
+                   for t in towns):
+            return {"hotel_choice": {}}  # nothing to show or choose
+        choice = interrupt({"type": "hotels", "message": state.get("hotels_msg"),
+                            "towns": towns, "travel": state["concierge"]["travel"]})
+        picks = choice.get("choices") if isinstance(choice, dict) else None
+        return {"hotel_choice": picks if isinstance(picks, dict) else {}}
+
+    def _apply_hotels(self, state: TripState) -> TripState:
+        """Swap in the chosen hotels (only ones that were offered), then re-price and
+        re-render the plan."""
+        offered = {t["dest"]: {o["stay_id"] for o in t["options"]}
+                   for t in state["concierge"]["towns"]}
+        plan, changed = deepcopy(state["plan"]), False
+        for d in plan["days"]:
+            pick = (state.get("hotel_choice") or {}).get(d["destination"])
+            if (d["day"] < state["request"]["days"] and pick in offered.get(d["destination"], ())
+                    and pick != d.get("stay")):
+                d["stay"], changed = pick, True
+        if not changed:
+            return {}
+        warnings = [w for w in state["warnings"] if not w.startswith("Estimated cost starts")]
+        new = {**state, "plan": plan, "warnings": warnings}
+        cost = self._cost(new)
+        new.update(cost)
+        new["warnings"] = list(dict.fromkeys(new["warnings"]))
+        return {"plan": plan, "cost": new["cost"], "warnings": new["warnings"],
+                **self._preview(new)}
 
     def _edit(self, state: TripState) -> TripState:
         return {"feedback": f"Traveller asked: {state['decision'].get('text', '')}",
@@ -644,8 +738,23 @@ class TripPlanner:
             "safety": state.get("safety", {}), "transport": state.get("transport", {}),
             "entities": {i: self._slim(ents[i]) for i in used if i in ents},
             "itinerary": text, "itinerary_en": english + "\n\n" + render_links(links),
-            "checklist": checklist}
+            "checklist": checklist, "concierge": self._concierge_summary(state, plan)}
         return {"final": text, "structured": structured, "status": "done"}
+
+    @staticmethod
+    def _concierge_summary(state: TripState, plan: dict) -> dict:
+        """What the saved trip keeps from the Concierge: per town the chosen hotel and the
+        researched options (reviews trimmed), plus verified travel notes."""
+        con = state.get("concierge") or {}
+        if not con:
+            return {}
+        stays = {d["destination"]: d.get("stay") for d in plan["days"] if d.get("stay")}
+        towns = []
+        for t in con.get("towns", []):
+            towns.append({"dest": t["dest"], "town": t["town"], "chosen": stays.get(t["dest"]),
+                          "options": [{**o, "reviews": o["reviews"][:3]} for o in t["options"]],
+                          "claims": t["claims"], "verified": t["verified"]})
+        return {"towns": towns, "travel": con.get("travel") or {}}
 
     # ---------------- wiring ----------------
     def _build(self, checkpointer):
@@ -656,7 +765,11 @@ class TripPlanner:
                          ("plan", self._plan), ("safety", self._safety),
                          ("critic", self._critic), ("cost", self._cost),
                          ("preview", self._preview), ("approve", self._approve), ("edit", self._edit),
-                         ("cancel", self._cancel), ("finalize", self._finalize)):
+                         ("cancel", self._cancel), ("finalize", self._finalize),
+                         ("concierge", self._concierge), ("hotel_research", self._hotel_research),
+                         ("travel_info", self._travel_info), ("rank_hotels", self._rank_hotels),
+                         ("choose_hotels", self._choose_hotels),
+                         ("apply_hotels", self._apply_hotels)):
             g.add_node(name, fn)
         g.add_edge(START, "extract")
         g.add_conditional_edges("extract", self._route_after_extract,
@@ -673,7 +786,15 @@ class TripPlanner:
         g.add_edge("cost", "preview")
         g.add_edge("preview", "approve")
         g.add_conditional_edges("approve", self._route_after_approve,
-                                {"finalize": "finalize", "edit": "edit", "cancel": "cancel"})
+                                {"finalize": "finalize", "edit": "edit", "cancel": "cancel",
+                                 "concierge": "concierge"})
+        g.add_conditional_edges("concierge", self._dispatch_concierge,
+                                ["hotel_research", "travel_info"])
+        g.add_edge("hotel_research", "rank_hotels")
+        g.add_edge("travel_info", "rank_hotels")
+        g.add_edge("rank_hotels", "choose_hotels")
+        g.add_edge("choose_hotels", "apply_hotels")
+        g.add_edge("apply_hotels", "finalize")
         g.add_edge("edit", "plan")
         g.add_edge("finalize", END)
         g.add_edge("cancel", END)
