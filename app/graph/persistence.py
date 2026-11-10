@@ -17,12 +17,18 @@ def is_postgres(url: str) -> bool:
 
 def make_pg_pool(url: str, max_size: int = 5):
     """A small connection pool. prepare_threshold=0 keeps it compatible with pooled
-    (PgBouncer) endpoints such as Neon's '-pooler' host."""
+    (PgBouncer) endpoints such as Neon's '-pooler' host.
+
+    Serverless Postgres (Neon) closes idle connections when its compute suspends, so every
+    connection is checked before it is handed out; a dead one is replaced instead of failing
+    the first request after a quiet spell."""
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    return ConnectionPool(url, min_size=1, max_size=max_size, open=True, kwargs={
-        "autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
+    return ConnectionPool(url, min_size=1, max_size=max_size, open=True,
+                          check=ConnectionPool.check_connection, kwargs={
+                              "autocommit": True, "prepare_threshold": 0,
+                              "row_factory": dict_row})
 
 
 def make_checkpointer(path: str, database_url: str = ""):
