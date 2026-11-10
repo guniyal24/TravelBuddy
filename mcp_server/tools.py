@@ -69,3 +69,13 @@ def conditions_for(place_id: str, month: int, lat: float | None = None,
             if flag:
                 out["advisories"].append(flag)
     return out
+
+
+def reviews_for(hotel: str, town: str, lat: float, lon: float, max_reviews: int = 5) -> dict:
+    from mcp_server.places import place_reviews
+    return place_reviews(hotel, town, lat, lon, max_reviews)
+
+
+def search_web(query: str, max_results: int = 5) -> dict:
+    from mcp_server.search import web_search
+    return web_search(query, max_results)

@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { cacheTrip, replanTrip, resumeTrip, startTrip } from "../api.js";
 import { DESTINATIONS, MONTHS } from "../data.js";
 import AgentTrace, { mergeEvents } from "./AgentTrace.jsx";
+import { HotelPicker } from "./Hotels.jsx";
 import Icon from "./Icon.jsx";
 import Mountains from "./Mountains.jsx";
 import TripView from "./TripView.jsx";
 
-const STEPS = ["Describe", "Choose", "Review", "Book"];
-const STEP_OF = { ask: 0, choose: 1, approve: 2, done: 3 };
+const STEPS = ["Describe", "Choose", "Review", "Hotels", "Book"];
+const STEP_OF = { ask: 0, choose: 1, approve: 2, hotels: 3, done: 4 };
 
 const EXAMPLES = [
   ["Temples and food, 3 days", "I want a 3 day trip in November for 2 people from Pune, budget stay, love temples and local food"],
@@ -45,7 +46,7 @@ export default function Trip({ onExpired, initialTrip }) {
     setPrompt(null); setStatus("done"); setError(""); setTrace([]);
   }, [initialTrip]);
 
-  const step = status === "done" ? 3 : prompt ? (STEP_OF[prompt.type] ?? 0) : 0;
+  const step = status === "done" ? 4 : prompt ? (STEP_OF[prompt.type] ?? 0) : 0;
 
   // fn receives onEvent: the server streams each agent step while it works
   async function run(fn, { fresh = false } = {}) {
@@ -196,7 +197,7 @@ export default function Trip({ onExpired, initialTrip }) {
           <div className="actionbar">
             <div className="actions">
               <button className="primary lg" onClick={() => reply({ action: "approve" })}>
-                <Icon name="check" size={18} /> Approve and get booking checklist
+                <Icon name="check" size={18} /> Approve plan
               </button>
               <button className="link danger" onClick={() => reply({ action: "cancel" })}>Cancel</button>
             </div>
@@ -208,6 +209,13 @@ export default function Trip({ onExpired, initialTrip }) {
             </form>
           </div>
         </div>
+      )}
+
+      {status === "waiting" && prompt?.type === "hotels" && (
+        <>
+          {how && <div className="card-pad">{how}</div>}
+          <HotelPicker prompt={prompt} onSubmit={(v) => reply(v)} />
+        </>
       )}
 
       {status === "done" && (

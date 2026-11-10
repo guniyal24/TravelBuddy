@@ -32,6 +32,8 @@ class LocalTools:
         "get_weather": impl.weather_for,
         "get_transport": impl.transport_for,
         "check_conditions": impl.conditions_for,
+        "place_reviews": impl.reviews_for,
+        "web_search": impl.search_web,
     }
 
     def call(self, name: str, **arguments) -> dict:

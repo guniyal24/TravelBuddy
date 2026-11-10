@@ -2,6 +2,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { MONTHS, TIERS } from "../data.js";
 import Checklist from "./Checklist.jsx";
+import { HotelSummary } from "./Hotels.jsx";
 import Icon from "./Icon.jsx";
 import MapView from "./MapView.jsx";
 import Share from "./Share.jsx";
@@ -103,6 +104,7 @@ function Banner({ trip }) {
 export default function TripView({ markdown, timeline, trip, onExpired }) {
   const [tab, setTab] = useState("plan");
   const tabs = [["plan", "Plan", "book"], ["timeline", "Timeline", "clock"], ["map", "Map", "map"],
+    ...(trip?.concierge?.towns?.length ? [["hotels", "Hotels", "bed"]] : []),
     ...(trip ? [["checklist", "Checklist", "check"], ["share", "Share", "share"]] : [])];
   return (
     <div className="tripview">
@@ -119,6 +121,7 @@ export default function TripView({ markdown, timeline, trip, onExpired }) {
         {tab === "plan" && <PlanText markdown={markdown} />}
         {tab === "timeline" && <Timeline timeline={timeline} />}
         {tab === "map" && <MapView timeline={timeline} />}
+        {tab === "hotels" && trip && <HotelSummary concierge={trip.concierge} />}
         {tab === "checklist" && trip && <Checklist trip={trip} onExpired={onExpired} />}
         {tab === "share" && trip && <Share trip={trip} onExpired={onExpired} />}
       </div>

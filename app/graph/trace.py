@@ -18,9 +18,11 @@ AGENTS = {
     "research": "Research", "specialists": "Supervisor", "plan": "Planner", "critic": "Critic",
     "safety": "Safety", "cost": "Cost", "preview": "Writer", "approve": "You",
     "edit": "Planner", "cancel": "Planner", "finalize": "Booking",
+    "concierge": "Concierge", "hotel_research": "Hotel agent", "travel_info": "Travel info",
+    "rank_hotels": "Ranker", "choose_hotels": "You", "apply_hotels": "Booking",
 }
 # Nodes that pause for the traveller: their "start" is not shown (it repeats on resume).
-HUMAN_NODES = {"ask_missing", "choose", "approve"}
+HUMAN_NODES = {"ask_missing", "choose", "approve", "choose_hotels"}
 START_MESSAGES = {
     "extract": "Reading your request",
     "options": "Scoring circuits against the season and your interests",
@@ -31,6 +33,10 @@ START_MESSAGES = {
     "cost": "Pricing the plan with the cost engine",
     "preview": "Preparing the plan for your review",
     "finalize": "Building booking links and your checklist",
+    "concierge": "Sending hotel agents to every overnight town, in parallel",
+    "travel_info": "Searching the web for current travel conditions",
+    "rank_hotels": "Ranking hotels by rating, review count, tier and budget",
+    "apply_hotels": "Updating your plan and cost with the hotels you picked",
 }
 MAX_DETAILS = 4
 
@@ -54,6 +60,8 @@ def _start(node: str, state: dict) -> str | None:
             return "Re-drafting the plan with your feedback"
         return ("Drafting a day-by-day plan" if attempt == 1
                 else f"Re-drafting the plan (attempt {attempt}) to fix the Critic's notes")
+    if node == "hotel_research":
+        return f"Reading Google reviews for hotels in {(state.get('town') or {}).get('name', '')}"
     return START_MESSAGES.get(node)
 
 
@@ -145,6 +153,42 @@ def _end(node: str, state: dict, out: dict) -> tuple[str, list[str], str] | None
         if action == "cancel":
             return "You cancelled the plan", [], "info"
         return "You asked for a change", [decision.get("text", "")][:1], "info"
+    if node == "concierge":  # every started step must finish, or its row keeps spinning
+        return "Hotel agents dispatched", [], "info"
+    if node == "hotel_research":
+        f = (out.get("hotel_findings") or [{}])[0]
+        if not f:
+            return None
+        detail = [f"{o['name']}: " + ", ".join(o["reasons"]) for o in f.get("options", [])]
+        if not f.get("google_available"):
+            return (f"{f.get('town')}: hotels from our data (live reviews unavailable)",
+                    detail, "info")
+        return (f"{f.get('town')}: {_n(len(f.get('options', [])), 'hotel')} researched, "
+                f"{_n(f.get('reviews_read', 0), 'review')} read, "
+                f"{f.get('verified', 0)} of {f.get('claims', 0)} review claims verified",
+                detail, "ok")
+    if node == "travel_info":
+        t = out.get("travel") or {}
+        if not t.get("available"):
+            return "Web search skipped: " + (t.get("reason") or "not configured"), [], "info"
+        return (f"{_n(len(t.get('notes', [])), 'verified note')} from the web "
+                f"({t.get('verified', 0)} of {t.get('claims', 0)} claims kept)",
+                [n["text"] for n in t.get("notes", [])], "ok")
+    if node == "rank_hotels":
+        towns = (out.get("concierge") or {}).get("towns") or []
+        return (f"Ranked hotels for {_n(len(towns), 'town')}",
+                ["Ranking is computed in code, so text inside a review cannot promote a hotel"],
+                "info")
+    if node == "choose_hotels":
+        picks = out.get("hotel_choice") or {}
+        return (f"You picked {_n(len(picks), 'hotel')}" if picks else "You kept your hotels",
+                [], "ok")
+    if node == "apply_hotels":
+        if not out.get("plan"):
+            return "No hotel changes", [], "info"
+        total = (out.get("cost") or {}).get("total_inr")
+        return ("Plan updated with your hotels" + (f": now {_inr(total[0])} to {_inr(total[1])}"
+                                                   if total else ""), [], "ok")
     if node == "edit":
         return "Sending your feedback to the Planner", [], "info"
     if node == "cancel":
@@ -155,7 +199,8 @@ def _end(node: str, state: dict, out: dict) -> tuple[str, list[str], str] | None
     return None
 
 
-WAIT_MESSAGES = {"ask_missing": "Waiting for a few more details from you",
+WAIT_MESSAGES = {"choose_hotels": "Waiting for you to pick hotels",
+                 "ask_missing": "Waiting for a few more details from you",
                  "choose": "Waiting for you to pick a circuit",
                  "approve": "Waiting for your approval"}
 

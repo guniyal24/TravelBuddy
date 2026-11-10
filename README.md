@@ -33,6 +33,7 @@ TravelBuddy's rule: **the LLM composes, code checks, the human decides.**
 | **Plans from a knowledge graph** | 333 sourced listings (Wikivoyage, OpenStreetMap) in Neo4j + Pinecone. The planner may only use ids it was given; a Critic rejects anything else. |
 | **Human in the loop** | Pick a circuit, approve or ask for changes ("less walking", "add a yoga class"), re-plan mid-trip from any day. Paused plans survive server restarts. |
 | **Live agent trace** | Each agent's real work streams to the UI (Server-Sent Events): what it found, what the Critic rejected, timings. |
+| **Concierge** | After you approve, hotel agents run in parallel, one per overnight town. They read Google reviews of that town's hotels, an analyst extracts pros and cons **with exact quotes** (checked in code; 95% survive), a code ranker orders them, and you pick. The plan and cost update. |
 | **Safety agent** | Altitude-gain rules, high-altitude health notes, monthly advisories with official links to confirm. |
 | **Honest costs** | Ranges, never single numbers; every line says if it is a listing price or an assumption. |
 | **Grounded Q&A** | Self-RAG answers with citations, and declines instead of guessing. |
@@ -59,19 +60,31 @@ flowchart LR
     C --> SF[Safety agent]
     SF --> CO[Cost engine]
     CO -->|approve / edit / cancel| U
-    U -->|approve| F[Booking checklist]
+    U -->|approve| CG{{Concierge}}
+    CG --> H1[Hotel agent<br/><i>town 1</i>]
+    CG --> H2[Hotel agent<br/><i>town 2</i>]
+    CG --> TI[Travel info<br/><i>web search</i>]
+    H1 & H2 & TI --> RK[Ranker<br/><i>code</i>]
+    RK -->|pick hotels| U
+    U -->|confirm| F[Booking checklist]
 
     subgraph MCP["Own MCP server"]
       T1[estimate_budget] ~~~ T2[check_season] ~~~ T3[check_altitude_plan]
       T4[get_weather] ~~~ T5[get_transport] ~~~ T6[check_conditions]
+      T7[place_reviews] ~~~ T8[web_search]
     end
-    TR & SF & CO -.tools.-> MCP
+    TR & SF & CO & H1 & H2 & TI -.tools.-> MCP
 ```
 
 - **LangGraph** state machine with `interrupt()` for human decisions and a durable checkpointer
   (Postgres in production, SQLite locally).
 - **Multi-agent:** Stay, Food and Transport agents run in parallel; the Critic, Safety agent
-  and cost engine are deterministic code, so their output is testable.
+  and cost engine are deterministic code, so their output is testable. After approval the
+  Concierge fans out with LangGraph `Send`: one hotel agent per overnight town plus a
+  travel-info agent, all concurrently.
+- **Untrusted content:** reviews and web pages reach the LLM only inside a delimited block
+  marked as data, the LLM can only fill a fixed JSON shape, every quote is verified against its
+  source in code, and ranking never depends on LLM text.
 - **MCP:** the planner reaches its tools through a real MCP client, in-process or over stdio.
   The same server works in any MCP host: `python -m mcp_server.server`.
 - **Self-RAG** for Q&A: retrieve → grade → rewrite → answer → verify grounding → or decline.
@@ -161,10 +174,8 @@ frontend/    React app (PWA)
 ## Roadmap
 
 1. Reliable LLM-as-judge: checklists, a multi-model jury, human-label agreement.
-2. Concierge stage: after approval, parallel agents research hotels (reviews) and live travel
-   info, with every claim cited and verified.
-3. Agent memory across trips, user-visible and deletable.
-4. Real travel dates with live weather, more towns, road routing.
+2. Agent memory across trips, user-visible and deletable.
+3. Real travel dates with live weather, more towns, road routing.
 
 ## Data and licences
 

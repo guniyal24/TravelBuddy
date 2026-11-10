@@ -20,6 +20,10 @@ services:
       - {key: NEO4J_USER, sync: false}
       - {key: NEO4J_PASSWORD, sync: false}
       - {key: NEO4J_DATABASE, value: neo4j}
+      # Concierge stage (optional): Google reviews, and web travel notes via Tavily
+      - {key: GOOGLE_PLACES_API_KEY, sync: false}
+      - {key: TAVILY_API_KEY, sync: false}
+      - {key: PLACES_DAILY_CAP, value: "300"}
       # The deployed frontend's origin, e.g. https://travelbuddy.vercel.app
       - {key: CORS_ORIGINS, sync: false}
       # Guest mode (try without an account) and its cost guards
