@@ -72,6 +72,10 @@ def validate_plan(plan: dict, entities: dict[str, dict], request: dict, season_f
         elif not last_day:
             errors.append(f"Day {n}: a stay is required for the night.")
 
+        if not d.get("stops"):  # the planner fills these where the town has places left
+            warnings.append(f"Day {n}: no more listed places in "
+                            f"{pretty(d.get('destination', ''))}; a free day to explore or rest.")
+
         located = [entities[i] for i in (d.get("stops") or []) if i in entities]
         worst = 0.0
         for a_i, a in enumerate(located):

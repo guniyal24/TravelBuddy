@@ -42,7 +42,8 @@ def test_planner_retries_when_it_borrows_a_meal_from_another_town():
     r = tp.resume("q", f"{HW}+{RK}")
     assert r["prompt"]["type"] == "approve"
     assert "is in Haridwar, not Rishikesh" in llm.prompts[-1]
-    assert r["prompt"]["plan"]["days"][2]["meals"] == []
+    meals = r["prompt"]["plan"]["days"][2]["meals"]
+    assert meals and all(ENTS[m]["destination_id"] == RK for m in meals)
 
 
 # ---------- Food agent ----------
@@ -269,6 +270,39 @@ def test_consecutive_nights_in_one_town_keep_one_hotel():
         {"day": 4, "destination": "destination_kausani", "stay": None}]}  # last day: no stay
     assert [d["stay"] for d in _one_stay_per_town(plan)["days"]] == ["s1", "s1", "s3", None]
     assert _one_stay_per_town({"days": "bad"}) == {"days": "bad"}
+
+
+def test_an_empty_day_is_filled_from_its_town_with_unused_places():
+    from app.graph.trip_graph import _fill_empty_days
+    almora = "destination_almora"
+    cands = {almora: {"stops": [{"id": "a1"}, {"id": "a2"}, {"id": "a3"}, {"id": "a4"}],
+                      "meals": [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}]}}
+    plan = {"days": [
+        {"day": 1, "destination": almora, "stops": ["a1", "a2"], "meals": ["m1"]},
+        {"day": 2, "destination": almora, "stops": [], "meals": []},          # left empty
+        {"day": 3, "destination": "destination_x", "stops": [], "meals": []}]}  # no candidates
+    days = _fill_empty_days(plan, cands)["days"]
+    assert days[1]["stops"] == ["a3", "a4"]        # never repeats day 1's stops
+    assert days[1]["meals"] == ["m2", "m3"]        # new places to eat first
+    assert days[2] == plan["days"][2]
+    assert _fill_empty_days(plan, cands, skip={2})["days"][1]["stops"] == []  # fixed days
+    assert _fill_empty_days({"days": "bad"}, cands) == {"days": "bad"}
+
+
+def test_a_day_left_empty_reaches_the_traveller_as_a_free_day():
+    _, warnings = validate_plan(_with_day(3, stops=[]), ENTS, REQ3, SEASON)
+    assert "Day 3: no more listed places in Rishikesh; a free day to explore or rest." in warnings
+
+
+def test_planner_fills_a_last_day_the_llm_left_empty():
+    empty_last = _with_day(3, stops=[], meals=[])
+    tp, _ = make([{"days": 3, "people": 2, "month": 11, "interests": []}, empty_last])
+    tp.start("e", "x")
+    r = tp.resume("e", f"{HW}+{RK}")
+    day3 = r["prompt"]["plan"]["days"][2]
+    assert day3["stops"] and day3["meals"]
+    used = {i for d in r["prompt"]["plan"]["days"][:2] for i in d["stops"]}
+    assert not used & set(day3["stops"])
 
 
 def test_heading_like_listings_are_not_places():
