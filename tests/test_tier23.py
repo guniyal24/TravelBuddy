@@ -116,6 +116,51 @@ def test_timeline_orders_a_day_and_adds_a_transfer_with_road_info():
     assert tl["points"] and all(p["lat"] and p["lon"] for p in tl["points"])
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("10AM - 2PM", (600, 840)),
+    ("9:30AM to 5:30PM", (570, 1050)),
+    ("8:15 AM- 11:30 PM", (495, 1410)),
+    ("Daily 09:00–16:00", (540, 960)),
+    ("9AM-1PM and 2:30PM–5:30PM", (540, 1050)),
+    ("12PM-12AM", (720, None)),     # closes at midnight: no limit within the day
+    ("Closes 11:30 PM", (None, 1410)),
+    ("24/7", (None, None)), ("24 hours", (None, None)), ("Annually", (None, None)),
+    (None, (None, None)),
+])
+def test_parse_hours(text, expected):
+    from app.graph.schedule import parse_hours
+    assert parse_hours(text) == expected
+
+
+def _hours_day(*stops):
+    ents = {s["id"]: {"type": "Attraction", "lat": 29.6, "lon": 79.66, **s} for s in stops}
+    ents["m"] = {"id": "m", "name": "Cafe", "type": "Eatery", "lat": 29.6, "lon": 79.66}
+    plan = {"days": [{"day": 1, "destination": "destination_almora",
+                      "stops": [s["id"] for s in stops], "meals": ["m"], "stay": None}]}
+    return build_timeline(plan, ents)
+
+
+def test_a_place_that_closes_early_is_visited_first():
+    tl = _hours_day({"id": "obs", "name": "Observatory"},
+                    {"id": "cave", "name": "Cave", "hours": "10AM - 2PM"})
+    stops = [i for i in tl["days"][0]["items"] if i["kind"] == "stop"]
+    assert [s["title"] for s in stops] == ["Cave", "Observatory"]
+    assert stops[0]["time"] == "10:00"  # not before it opens
+    assert tl["warnings"] == []
+
+
+def test_a_stop_that_cannot_fit_its_hours_is_flagged():
+    tl = _hours_day({"id": "a", "name": "Fort", "hours": "9AM-10AM"},
+                    {"id": "b", "name": "Shrine", "hours": "9AM-10AM"})
+    late = [i for i in tl["days"][0]["items"] if i.get("late")]
+    assert [i["title"] for i in late] == ["Shrine"]
+    assert "May be closed by then" in late[0]["note"]
+    assert tl["warnings"] == ["Day 1: Shrine may be closed by the time you get there "
+                              "(hours: 9AM-10AM)."]
+    fort = next(i for i in tl["days"][0]["items"] if i["title"] == "Fort")
+    assert (fort["time"], fort["end"]) == ("09:00", "10:00")  # cut short at closing time
+
+
 # ---------- exports ----------
 def _trip():
     tl = build_timeline(GOOD, ENTS)

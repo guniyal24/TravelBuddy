@@ -36,7 +36,7 @@ from app.graph.agents import (
     TransportAgent,
 )
 from app.graph.concierge import HotelAgent, TravelInfoAgent
-from app.graph.critic import fallback_plan, validate_plan
+from app.graph.critic import MAX_MEALS, fallback_plan, validate_plan
 from app.graph.render import render_itinerary
 from app.graph.schedule import build_timeline
 from app.graph.trace import Tracer
@@ -568,7 +568,9 @@ class TripPlanner:
             user += f"\n\nFix these problems from the last attempt: {state['feedback']}"
         plan = self.llm.json(self.big, [{"role": "system", "content": PLAN_SYSTEM},
                                         {"role": "user", "content": user}], default={})
-        plan = _one_stay_per_town(_apply_lock(_expand_aliases(plan, alias_to_id), locked))
+        plan = _apply_lock(_expand_aliases(plan, alias_to_id), locked)
+        plan = _one_stay_per_town(_fill_empty_days(plan, state["candidates"],
+                                                   {d["day"] for d in locked}))
         return {"plan": plan, "plan_attempts": state.get("plan_attempts", 0) + 1}
 
     # ---------------- critic ----------------
@@ -709,10 +711,12 @@ class TripPlanner:
     def _preview(self, state: TripState) -> TripState:
         """Build (and translate) the review text once. LangGraph re-runs an interrupting node
         from the top when it resumes, so slow work must not live inside the approve node."""
+        timeline = self._timeline(state)
+        # opening-hours clashes are only known once the day is timed
+        warnings = list(dict.fromkeys([*state["warnings"], *timeline.get("warnings", [])]))
         text = render_itinerary(state["plan"], state["entities"], state["cost"],
-                                state["warnings"], state["request"],
-                                weather=state.get("weather"))
-        return {"preview": self._loc(state, text), "timeline": self._timeline(state),
+                                warnings, state["request"], weather=state.get("weather"))
+        return {"preview": self._loc(state, text), "timeline": timeline, "warnings": warnings,
                 "approve_msg": self._loc(state, "Approve this plan, or tell me what to change?")}
 
     def _approve(self, state: TripState) -> TripState:
@@ -1040,6 +1044,37 @@ def _apply_lock(plan: dict, locked: list[dict]) -> dict:
     last = max(d["day"] for d in locked)
     rest = [d for d in plan["days"] if isinstance(d, dict) and d.get("day", 0) > last]
     return {**plan, "days": [*locked, *rest]}
+
+
+FILL_STOPS = 2
+
+
+def _fill_empty_days(plan: dict, candidates: dict, skip: set[int] = frozenset()) -> dict:
+    """The LLM sometimes leaves a day (usually the last) with no stops or meals while that
+    town still has unused places. Fill it from the town's candidates, best-ranked first:
+    stops not used on any other day, and meals preferring ones not eaten at yet."""
+    if not isinstance(plan, dict) or not isinstance(plan.get("days"), list):
+        return plan
+    days = [d for d in plan["days"] if isinstance(d, dict)]
+    used_stops = {i for d in days for i in d.get("stops") or []}
+    used_meals = {i for d in days for i in d.get("meals") or []}
+    out = []
+    for d in plan["days"]:
+        pools = candidates.get(d.get("destination")) if isinstance(d, dict) else None
+        if not pools or d.get("day") in skip:
+            out.append(d)
+            continue
+        d = dict(d)
+        if not d.get("stops"):
+            d["stops"] = [e["id"] for e in pools.get("stops", [])
+                          if e["id"] not in used_stops][:FILL_STOPS]
+            used_stops.update(d["stops"])
+        if not d.get("meals"):
+            meals = [e["id"] for e in pools.get("meals", [])]
+            d["meals"] = sorted(meals, key=lambda i: i in used_meals)[:MAX_MEALS]
+            used_meals.update(d["meals"])
+        out.append(d)
+    return {**plan, "days": out}
 
 
 def _one_stay_per_town(plan: dict) -> dict:

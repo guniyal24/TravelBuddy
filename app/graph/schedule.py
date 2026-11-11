@@ -1,8 +1,11 @@
 """Turn an approved plan into a time-of-day timeline and map points. Deterministic, no LLM.
 
-Times are a *suggested* rhythm (09:00 start, lunch about 13:00, dinner about 19:30), not
-opening-hours-aware. Travel between stops is a straight-line estimate at hill-road speed.
+Times are a *suggested* rhythm (09:00 start, lunch about 13:00, dinner about 19:30). Where a
+listing gives opening hours, stops that close early go first, a stop is not started before it
+opens, and one that still cannot fit is flagged. Travel between stops is a straight-line
+estimate at hill-road speed.
 """
+import re
 from math import ceil
 
 from ingest.geo import haversine_km
@@ -15,6 +18,31 @@ STOP_MINUTES = {"Attraction": 90, "Activity": 120}
 MEAL_MINUTES = 60
 HILL_KMH = 25.0
 DETOUR = 1.5  # roads are longer than the straight line
+
+
+# "10AM", "8:15 AM", "5:30PM" or a 24-hour "09:00"
+_TIME = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b|\b(\d{1,2}):(\d{2})\b", re.I)
+
+
+def parse_hours(text: str | None) -> tuple[int | None, int | None]:
+    """Opening and closing minutes from a listing's free-text hours: the first time is the
+    opening, the last the closing ("9AM-1PM and 2:30PM-5:30PM" is 09:00-17:30). (None, None)
+    when there is nothing to go on ("24/7", "Annually"); "Closes 11:30 PM" gives only a close."""
+    found = []
+    for m in _TIME.finditer(text or ""):
+        if m.group(4) is not None:
+            h, mins = int(m.group(4)), int(m.group(5))
+        else:
+            h, mins = int(m.group(1)) % 12, int(m.group(2) or 0)
+            h += 12 if m.group(3).lower() == "p" else 0
+        if h < 24 and mins < 60:
+            found.append(h * 60 + mins)
+    if not found:
+        return None, None
+    if len(found) == 1:
+        return (None, found[0]) if re.search(r"\bclos", text, re.I) else (found[0], None)
+    open_, close = found[0], found[-1]
+    return (open_, close) if close > open_ else (open_, None)  # past midnight: no limit
 
 
 def hhmm(minutes: int) -> str:
@@ -43,7 +71,7 @@ def build_timeline(plan: dict, entities: dict[str, dict], transfer_fn=None,
                    start_date: str | None = None, weather: dict | None = None) -> dict:
     from app.graph.render import day_date
     by_day = {w["day"]: w for w in (weather or {}).get("days", [])}
-    days_out, points = [], []
+    days_out, points, warnings = [], [], []
     prev_dest = None
     for d in plan["days"]:
         dest = d["destination"]
@@ -60,6 +88,8 @@ def build_timeline(plan: dict, entities: dict[str, dict], transfer_fn=None,
             cursor = max(START_MIN, 8 * 60 + ceil(hours_hi * 60) + 30)
         meals = [entities[i] for i in d.get("meals") or [] if i in entities]
         stops = [entities[i] for i in d.get("stops") or [] if i in entities]
+        # places that close early first; the planner's order is kept otherwise (stable sort)
+        stops.sort(key=lambda s: parse_hours(s.get("hours"))[1] or 24 * 60)
         lunch_done = False
         last = None
         for s in stops:
@@ -68,12 +98,27 @@ def build_timeline(plan: dict, entities: dict[str, dict], transfer_fn=None,
                 items.append(_item("meal", start, MEAL_MINUTES, meals[0], f"Lunch: {meals[0]['name']}"))
                 cursor, lunch_done = start + MEAL_MINUTES, True
                 last = meals[0]
+            hop_note = ""
             if last is not None and last is not s:
                 hop, hop_note = _hop_minutes(last, s)
                 cursor += hop
             dur = STOP_MINUTES.get(s.get("type"), 90)
-            items.append(_item("stop", cursor, dur, s, s["name"],
-                               f"{hop_note}" if last is not None and hop_note else ""))
+            opens, closes = parse_hours(s.get("hours"))
+            if opens is not None and cursor < opens:
+                cursor = opens  # do not arrive before it opens
+            notes = [hop_note] if hop_note else []
+            late = closes is not None and cursor + 30 > closes  # under 30 minutes before closing
+            if late:
+                notes.append(f"May be closed by then (hours: {s['hours']}); go earlier or "
+                             "swap with another stop")
+            elif closes is not None and cursor + dur > closes:
+                dur = closes - cursor  # a shorter visit, ending at closing time
+            item = _item("stop", cursor, dur, s, s["name"], "; ".join(notes))
+            if late:
+                item["late"] = True
+                warnings.append(f"Day {d['day']}: {s['name']} may be closed by the time you "
+                                f"get there (hours: {s['hours']}).")
+            items.append(item)
             cursor += dur
             last = s
         if meals and not lunch_done:
@@ -99,6 +144,6 @@ def build_timeline(plan: dict, entities: dict[str, dict], transfer_fn=None,
                                "title": it["title"], "lat": it["lat"], "lon": it["lon"],
                                "time": it["time"]})
         prev_dest = dest
-    return {"days": days_out, "points": points,
+    return {"days": days_out, "points": points, "warnings": warnings,
             "note": "Suggested rhythm only. Check opening hours and allow extra time on hill "
                     "roads; travel times between stops are straight-line estimates."}
