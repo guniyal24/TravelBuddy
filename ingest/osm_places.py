@@ -30,7 +30,8 @@ CAPS = {EntityType.STAY: 15, EntityType.EATERY: 12, EntityType.ATTRACTION: 20}
 MAX_WORSHIP = 8  # temples are everywhere; keep the attraction list varied
 GENERIC = {"temple", "mandir", "hotel", "restaurant", "cafe", "guest house", "dhaba", "homestay",
            "shiv mandir", "hanuman mandir", "durga mandir", "masjid", "church", "viewpoint",
-           "view point", "waterfall", "park", "camp"}
+           "view point", "waterfall", "park", "camp", "garage", "parking", "house", "home",
+           "shop"}
 
 STAY = {"hotel", "guest_house", "hostel", "motel", "apartment", "camp_site", "alpine_hut",
         "chalet"}

@@ -44,3 +44,11 @@ def test_fill_from_osm_sets_source(monkeypatch):
     stats = osm.fill_from_osm([stay], [DEST])
     assert stats == {"tried": 1, "filled": 1}
     assert (stay.lat, stay.coord_source) == (30.10, "osm")
+
+
+def test_osm_names_that_describe_a_thing_not_a_place_are_dropped():
+    from ingest.osm_places import _name
+    for junk in ("garage", "Parking", "Temple", "Home"):
+        assert _name({"name": junk}) is None, junk
+    assert _name({"name": "Kasar Devi Temple"}) == "Kasar Devi Temple"
+    assert _name({"name": "Garage Cafe"}) == "Garage Cafe"

@@ -53,7 +53,7 @@ destinations:
      themes: [lake, boating, hill, honeymoon, views, family], aliases: [naini tal, नैनीताल], station: [KGM, Kathgodam]}
   - {id: destination_jim_corbett, name: Jim Corbett, wikivoyage_page: Jim Corbett National Park, region: Kumaon, lat: 29.5300, lon: 78.7747, elevation_m: 400, offer: true,
      themes: [wildlife, safari, tiger, nature, jungle, birding, family], aliases: [corbett, ramnagar, जिम कॉर्बेट, कॉर्बेट], station: [RMR, Ramnagar (for Jim Corbett)]}
-  - {id: destination_almora, name: Almora, wikivoyage_page: Almora, region: Kumaon, lat: 29.5971, lon: 79.6591, elevation_m: 1650, offer: true,
+  - {id: destination_almora, name: Almora, wikivoyage_page: Almora, region: Kumaon, lat: 29.5971, lon: 79.6591, elevation_m: 1650, offer: true, osm_places: true,
      themes: [culture, heritage, craft, food, views, quiet], aliases: [अल्मोड़ा, अल्मोडा], station: [KGM, Kathgodam]}
   - {id: destination_ranikhet, name: Ranikhet, wikivoyage_page: Ranikhet, region: Kumaon, lat: 29.6434, lon: 79.4322, elevation_m: 1830, offer: true,
      themes: [quiet, golf, views, hill, nature, family], aliases: [रानीखेत], station: [KGM, Kathgodam]}

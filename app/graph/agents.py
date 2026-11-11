@@ -24,7 +24,9 @@ HIGH_TOWN_M = 2500
 # Bars and pubs count too: a vegetarian traveller asking for veg food rarely wants one.
 NON_VEG = re.compile(
     r"(?<![a-z])(non[- ]?veg|chicken|mutton|fish|meat|eggs?|kebabs?|kababs?|seekh|prawns?|"
-    r"pork|beef|lamb|seafood|bar|pub|brewery|tavern)(?![a-z])")
+    r"pork|beef|lamb|seafood|bar|pub|brewery|tavern)(?![a-z])"
+    # a biryani place is usually non-veg; "veg biryani" says otherwise
+    r"|(?<![a-z])(?<!veg )(biryani|biriyani)(?![a-z])")
 VEG_WORDS = ("pure veg", "vegetarian", "veg only", "vegan", "jain")
 BUDGET_SHARE_FOR_STAYS = 0.4  # of the traveller's total budget
 
