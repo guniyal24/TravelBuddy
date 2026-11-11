@@ -57,13 +57,14 @@ def build_checks(planner, trips) -> dict[str, Callable[[], dict | None]]:
                                              encoding_format="float").data[0].embedding
             return {"dim": len(vec)}
         checks["embeddings"] = embeddings
-    if planner is not None:  # live weather (Open-Meteo, no key); uncached so it is a real check
+    if planner is not None:  # live weather, the same fallback path as the planner, uncached
         def weather():
-            from mcp_server.weather import FORECAST, fetch_uncached
-            today = date.today().isoformat()
-            fetch_uncached(FORECAST, {"latitude": 30.32, "longitude": 78.03,
-                                      "daily": "temperature_2m_max", "start_date": today,
-                                      "end_date": today}, attempts=1)
+            from mcp_server import weather as wm
+            today = date.today()
+            w = wm.get_weather(30.32, 78.03, today, today,
+                               fetch=lambda url, params: wm.fetch_uncached(url, params, 1),
+                               fetch_met=wm.fetch_met_uncached)
+            return {"source": w.get("source")}
         checks["weather"] = weather
     llm, model = getattr(planner, "llm", None), getattr(planner, "small", None)
     if llm is not None and model:
