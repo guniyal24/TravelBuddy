@@ -6,6 +6,20 @@ export const MONTHS = ["January", "February", "March", "April", "May", "June", "
 
 export const TIERS = { budget: "Budget", mid: "Mid-range", premium: "Premium" };
 
+// Town photos: Wikimedia Commons, resized to 800px wide (and the Ranikhet panorama cropped).
+// Each licence needs the author and licence shown: see PhotoCredits.
+export const PHOTOS = {
+  haridwar: { src: "towns/haridwar.jpg", alt: "Evening Ganga aarti at Har Ki Pauri, Haridwar", author: "pavankunar", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0", source: "https://commons.wikimedia.org/wiki/File:Ganga_aarti_haridwar_01.jpg" },
+  rishikesh: { src: "towns/rishikesh.jpg", alt: "Lakshman Jhula bridge over the Ganga, Rishikesh", author: "Snehrashmi", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0", source: "https://commons.wikimedia.org/wiki/File:Lakshman_Jhula_Bridge_-_Hrishikesh_-_Uttarakhand_001.jpg" },
+  dehradun: { src: "towns/dehradun.jpg", alt: "Forest Research Institute, Dehradun", author: "DesiBoy101", license: "CC BY 4.0", licenseUrl: "https://creativecommons.org/licenses/by/4.0", source: "https://commons.wikimedia.org/wiki/File:Forest_Research_Institute_in_Dehradun_54.jpg" },
+  mussoorie: { src: "towns/mussoorie.jpg", alt: "Snow on the ridge at Mussoorie above the Doon valley", author: "Paul Hamilton", license: "CC BY-SA 2.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/2.0", source: "https://commons.wikimedia.org/wiki/File:Mussoorie_Snow_Over_Dehradun_(14831297545).jpg" },
+  nainital: { src: "towns/nainital.jpg", alt: "Naini Lake and the town of Nainital from above", author: "Skalvanov", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0", source: "https://commons.wikimedia.org/wiki/File:Nainital_metro.jpg" },
+  almora: { src: "towns/almora.jpg", alt: "Almora town on its ridge", author: "Travelling Slacker", license: "CC BY 2.0", licenseUrl: "https://creativecommons.org/licenses/by/2.0", source: "https://commons.wikimedia.org/wiki/File:Almora_Uttarakhand_India_2013.jpg" },
+  ranikhet: { src: "towns/ranikhet.jpg", alt: "Himalayan peaks seen from Ranikhet", author: "Harshit SR (panorama by Unpetitpro)", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0", source: "https://commons.wikimedia.org/wiki/File:Panorama_of_Himalayas_from_Ranikhet,_Uttarakhand,_India.jpg" },
+  jim_corbett: { src: "towns/jim_corbett.jpg", alt: "A Bengal tiger in Jim Corbett National Park", author: "Soumyajit Nandy", license: "CC BY-SA 3.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/3.0", source: "https://commons.wikimedia.org/wiki/File:Bengal-Tiger_Corbett_Uttarakhand_Dec-2013.jpg" },
+  badrinath: { src: "towns/badrinath.jpg", alt: "Badrinath Temple", author: "Anubha khare", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0", source: "https://commons.wikimedia.org/wiki/File:Badrinath_Temple_,_Uttarakhand.jpg" },
+};
+
 export const DESTINATIONS = [
   { id: "haridwar", name: "Haridwar", tagline: "Ganga aarti, ghats and old temples", tags: ["Spiritual", "Food"], g: ["#043e56", "#2f87b5"] },
   { id: "rishikesh", name: "Rishikesh", tagline: "Yoga, rafting and riverside cafes", tags: ["Adventure", "Yoga"], g: ["#0a6a8f", "#52b6d9"] },
