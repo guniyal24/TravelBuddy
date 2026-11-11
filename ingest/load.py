@@ -1,7 +1,10 @@
 """Load data/processed/entities.json into Neo4j and Pinecone.
 
-    python -m ingest.load neo4j      [--dry-run] [--wipe]
-    python -m ingest.load pinecone   [--dry-run]
+    python -m ingest.load neo4j      [--dry-run] [--wipe] [--only destination_almora ...]
+    python -m ingest.load pinecone   [--dry-run]          [--only destination_almora ...]
+
+`--only` loads just those towns (after `ingest.build --only ... --merge`) and removes their
+places that are no longer in entities.json from the store.
 
 Neo4j gets every entity as (:Entity:<Type>) plus typed relationships.
 Pinecone gets one vector per entity (embedding of `semantic_text`) with small metadata.
@@ -51,9 +54,10 @@ def node_props(e: dict) -> dict:
     return {k: v for k, v in props.items() if v is not None}
 
 
-def relationships(entities: list[dict]) -> dict[str, list[dict]]:
-    """Group edges by relationship type. Edges to unknown ids are dropped."""
-    ids = {e["id"] for e in entities}
+def relationships(entities: list[dict], known: set[str] | None = None) -> dict[str, list[dict]]:
+    """Group edges by relationship type. Edges to unknown ids are dropped; `known` is every id
+    in the store when only some entities are being loaded."""
+    ids = known if known is not None else {e["id"] for e in entities}
     grouped: dict[str, list[dict]] = {}
     for e in entities:
         for c in e.get("connections", []):
@@ -63,6 +67,18 @@ def relationships(entities: list[dict]) -> dict[str, list[dict]]:
             grouped.setdefault(rel, []).append(
                 {"src": e["id"], "dst": c["target"], "km": c.get("distance_km")})
     return grouped
+
+
+def select_towns(entities: list[dict], towns: list[str]) -> list[dict]:
+    """The towns themselves and every place in them."""
+    wanted = set(towns)
+    return [e for e in entities if e["id"] in wanted or e.get("destination_id") in wanted]
+
+
+def place_prefixes(towns: list[str]) -> list[str]:
+    """Id prefixes of a town's places (ids are <type>_<town>_<name>, see schema.make_id)."""
+    return [f"{t}_{town.removeprefix('destination_')}_" for town in towns
+            for t in ("attraction", "activity", "eatery", "stay")]
 
 
 def pinecone_record(e: dict) -> dict:
@@ -85,7 +101,8 @@ def _chunks(items: list, n: int):
         yield items[i : i + n]
 
 
-def load_neo4j(entities: list[dict], wipe: bool = False) -> dict:
+def load_neo4j(entities: list[dict], wipe: bool = False, known: set[str] | None = None,
+               towns: list[str] | None = None) -> dict:
     from neo4j import GraphDatabase
 
     uri = os.environ["NEO4J_URI"]
@@ -93,11 +110,17 @@ def load_neo4j(entities: list[dict], wipe: bool = False) -> dict:
     db = os.getenv("NEO4J_DATABASE", "neo4j")
     driver = GraphDatabase.driver(uri, auth=(user, os.environ["NEO4J_PASSWORD"]), database=db)
     driver.verify_connectivity()
-    rels = relationships(entities)
+    rels = relationships(entities, known)
+    removed = 0
     with driver.session() as s:
         s.run("CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (n:Entity) REQUIRE n.id IS UNIQUE")
         if wipe:
             s.run("MATCH (n:Entity) DETACH DELETE n")
+        if towns:  # places dropped from these towns since the last load
+            removed = s.run(
+                "MATCH (n:Entity) WHERE n.destination_id IN $towns AND NOT n.id IN $keep "
+                "DETACH DELETE n RETURN count(*) AS n",
+                towns=towns, keep=[e["id"] for e in entities]).single()["n"]
         by_type: dict[str, list[dict]] = {}
         for e in entities:
             by_type.setdefault(e["type"], []).append(node_props(e))
@@ -116,11 +139,11 @@ def load_neo4j(entities: list[dict], wipe: bool = False) -> dict:
         counts = s.run("MATCH (n:Entity) RETURN count(n) AS n").single()["n"]
         edges = s.run("MATCH (:Entity)-[r]->(:Entity) RETURN count(r) AS n").single()["n"]
     driver.close()
-    return {"nodes": counts, "relationships": edges}
+    return {"nodes": counts, "relationships": edges, "removed": removed}
 
 
 # ---------- Pinecone ----------
-def load_pinecone(entities: list[dict]) -> dict:
+def load_pinecone(entities: list[dict], towns: list[str] | None = None) -> dict:
     from openai import OpenAI
     from pinecone import Pinecone
 
@@ -147,7 +170,16 @@ def load_pinecone(entities: list[dict]) -> dict:
         index.upsert(vectors=[
             {"id": r["id"], "values": d.embedding, "metadata": r["metadata"]}
             for r, d in zip(chunk, resp.data, strict=True)])
-    return {"vectors_upserted": len(records), "index": name}
+    stale: list[str] = []
+    if towns:  # places dropped from these towns since the last load
+        keep = {r["id"] for r in records}
+        for prefix in place_prefixes(towns):
+            for page in index.list(prefix=prefix):
+                ids = [getattr(i, "id", i) for i in page]  # ListItem objects in newer clients
+                stale += [i for i in ids if i not in keep]
+        for chunk in _chunks(stale, BATCH):
+            index.delete(ids=chunk)
+    return {"vectors_upserted": len(records), "removed": stale, "index": name}
 
 
 def main() -> None:
@@ -157,15 +189,23 @@ def main() -> None:
     ap.add_argument("target", choices=["neo4j", "pinecone"])
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--wipe", action="store_true", help="neo4j: delete existing :Entity nodes first")
+    ap.add_argument("--only", nargs="*", help="destination ids: load just these towns")
     args = ap.parse_args()
+    if args.only and args.wipe:
+        ap.error("--wipe would delete every other town; use it only for a full load")
 
-    entities = load_entities()
+    everything = load_entities()
+    known = {e["id"] for e in everything}
+    entities = select_towns(everything, args.only) if args.only else everything
+    if args.only and not entities:
+        ap.error(f"no entities for {args.only}")
     if args.dry_run:
-        rels = relationships(entities)
+        rels = relationships(entities, known)
         print(f"{len(entities)} entities; relationships: "
               + ", ".join(f"{k}={len(v)}" for k, v in sorted(rels.items())))
         return
-    result = load_neo4j(entities, args.wipe) if args.target == "neo4j" else load_pinecone(entities)
+    result = (load_neo4j(entities, args.wipe, known, args.only) if args.target == "neo4j"
+              else load_pinecone(entities, args.only))
     print(result)
 
 

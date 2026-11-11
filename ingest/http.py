@@ -9,7 +9,7 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-USER_AGENT = "UttarakhandPlannerBot/0.1 (https://github.com/Swatii2810; student portfolio project)"
+USER_AGENT = "TravelBuddy/1.0 (https://github.com/guniyal24/TravelBuddy; trip planner data build)"
 RAW_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 
 

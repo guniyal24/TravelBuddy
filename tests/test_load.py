@@ -34,3 +34,15 @@ def test_pinecone_record_has_no_coordinates_and_truncates_text():
     assert len(meta["semantic_text"]) == 500 and meta["city"] == "Haridwar"
     assert meta["tier"] == "budget"
     assert pinecone_record(ENTITIES[0])["metadata"]["city"] == "Haridwar"
+
+
+def test_loading_one_town_keeps_its_links_to_the_rest_of_the_store():
+    from ingest.load import place_prefixes, select_towns
+    town = select_towns(ENTITIES, ["destination_haridwar"])
+    assert [e["id"] for e in town] == ["destination_haridwar", "stay_haridwar_x"]
+    # Rishikesh is not being loaded but is already in the store, so the edge is kept
+    known = {e["id"] for e in ENTITIES}
+    assert relationships(town, known)["NEAR"][0]["dst"] == "destination_rishikesh"
+    assert "NEAR" not in relationships(town)
+    assert "stay_haridwar_" in place_prefixes(["destination_haridwar"])
+    assert all(p.endswith("_haridwar_") for p in place_prefixes(["destination_haridwar"]))

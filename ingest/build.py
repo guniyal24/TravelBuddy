@@ -251,10 +251,12 @@ def main() -> None:
     add_membership_edges(everything)
     add_near_edges(everything)
     add_destination_links(destinations)
-    everything += curated_entities(destinations, today)
+    curated = curated_entities(destinations, today)  # also links each town to its dishes
 
     OUT.mkdir(parents=True, exist_ok=True)
     if args.merge and (OUT / "entities.json").exists():
+        # Gateways and dishes link to every town; rebuilt from only these towns they would lose
+        # the rest of their links, so the existing ones are kept as they are.
         rebuilt = {c["id"] for c in cfgs}
         old = json.loads((OUT / "entities.json").read_text())
         fresh = {e.id for e in everything}
@@ -265,6 +267,7 @@ def main() -> None:
         (OUT / "entities.json").write_text(json.dumps(merged, indent=2, ensure_ascii=False))
         log.info("Wrote %d entities to %s", len(merged), OUT)
         return
+    everything += curated
     (OUT / "entities.json").write_text(
         json.dumps([e.model_dump(mode="json") for e in everything], indent=2, ensure_ascii=False))
     (OUT / "getting_in_notes.json").write_text(json.dumps(notes, indent=2, ensure_ascii=False))
