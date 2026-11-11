@@ -58,6 +58,14 @@ def test_veg_filter_drops_bars_and_meat_by_whole_word():
     assert note.startswith("2 eatery listings mentioning meat, fish or a bar were left out")
 
 
+def test_veg_filter_treats_a_biryani_house_as_non_veg_unless_it_says_veg():
+    meals = [{"name": "The Biriyani House", "description": "Restaurant"},
+             {"name": "Shahi Biryani", "description": "chicken and veg biryani"},
+             {"name": "Annapurna", "description": "veg biryani and thali"}]
+    kept, _ = FoodAgent.filter({}, meals, "veg")
+    assert [m["name"] for m in kept] == ["Annapurna"]
+
+
 def test_town_with_no_eateries_gets_an_honest_note():
     for diet in ("veg", ""):
         kept, note = FoodAgent.filter({}, [], diet)
