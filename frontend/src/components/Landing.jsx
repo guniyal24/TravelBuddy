@@ -2,6 +2,7 @@ import { DESTINATIONS, FAQ, FEATURES, STACK, STEPS_INFO } from "../data.js";
 import Icon from "./Icon.jsx";
 import Logo from "./Logo.jsx";
 import Mountains from "./Mountains.jsx";
+import { PhotoCredits, TownPhoto } from "./TownPhoto.jsx";
 
 const SAMPLE = [
   { kind: "stop", time: "07:00", label: "Visit", text: "Har Ki Pauri, morning on the ghats" },
@@ -113,6 +114,7 @@ export default function Landing({ onLogin, onRegister, onGuest, guestBusy }) {
             {DESTINATIONS.map((d) => (
               <button key={d.id} className="dest-card" onClick={onGuest}
                       style={{ "--g1": d.g[0], "--g2": d.g[1] }}>
+                <TownPhoto id={d.id} className="dest-photo" />
                 <span className="dest-top"><Icon name="pin" size={18} /> Uttarakhand</span>
                 <span className="dest-name">{d.name}</span>
                 <span className="dest-tag">{d.tagline}</span>
@@ -189,6 +191,7 @@ export default function Landing({ onLogin, onRegister, onGuest, guestBusy }) {
             Planning aid only. Check weather, road and permit advisories before you travel.
             Data: Wikivoyage (CC BY-SA), OpenStreetMap contributors.
           </p>
+          <PhotoCredits />
         </div>
       </footer>
     </div>

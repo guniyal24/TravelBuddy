@@ -5,6 +5,7 @@ import AgentTrace, { mergeEvents } from "./AgentTrace.jsx";
 import { HotelPicker } from "./Hotels.jsx";
 import Icon from "./Icon.jsx";
 import Mountains from "./Mountains.jsx";
+import { PhotoCredits, TownPhoto } from "./TownPhoto.jsx";
 import TripView from "./TripView.jsx";
 
 const STEPS = ["Describe", "Choose", "Review", "Hotels", "Book"];
@@ -131,11 +132,12 @@ export default function Trip({ onExpired, initialTrip }) {
             {DESTINATIONS.map((d) => (
               <button key={d.id} className="pick" onClick={() => { pick(d.name); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                       style={{ "--g1": d.g[0], "--g2": d.g[1] }}>
-                <span className="pick-dot" />
-                <span><strong>{d.name}</strong><small>{d.tags.join(" · ")}</small></span>
+                <span className="pick-photo"><TownPhoto id={d.id} /></span>
+                <span className="pick-text"><strong>{d.name}</strong><small>{d.tags.join(" · ")}</small></span>
               </button>
             ))}
           </div>
+          <PhotoCredits className="small" />
 
           <h2 className="h-sm">What you get</h2>
           <div className="get-grid">
