@@ -136,7 +136,7 @@ npm run dev
 ```
 
 - [Website](http://localhost:5173) · [API documentation](http://localhost:8000/docs)
-- `GET /health` checks whether the API is running. `GET /health/deps` probes the configured graph, vector index, models, trip storage, and weather service.
+- `GET /health` checks whether the API is running. `GET /health/deps` probes the configured graph, vector index, models, trip storage, and weather service. A weather outage is reported as optional.
 
 ### Run checks
 

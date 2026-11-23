@@ -219,7 +219,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health/deps")
     async def health_deps(request: Request):
-        """Readiness: can the API reach every service it needs? 503 if any check fails."""
+        """Report readiness and optional dependency health. Required failures return 503."""
         result = await run_in_threadpool(deps_health.get,
                                          getattr(request.app.state, "planner", None),
                                          getattr(request.app.state, "trips", None))

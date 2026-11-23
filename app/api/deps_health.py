@@ -15,12 +15,12 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
-from datetime import date
 
 log = logging.getLogger(__name__)
 
 CHECK_TIMEOUT = 20.0
 CACHE_SECONDS = 60.0
+OPTIONAL_CHECKS = {"weather"}
 
 
 def describe_error(exc: BaseException) -> str:
@@ -63,7 +63,7 @@ def build_checks(planner, trips) -> dict[str, Callable[[], dict | None]]:
     if planner is not None:  # live weather, the same fallback path as the planner, uncached
         def weather():
             from mcp_server import weather as wm
-            today = date.today()
+            today = wm.travel_date()
             w = wm.get_weather(30.32, 78.03, today, today,
                                fetch=lambda url, params: wm.fetch_uncached(url, params, 1),
                                fetch_met=wm.fetch_met_uncached)
@@ -92,10 +92,13 @@ def run_checks(checks: dict[str, Callable[[], dict | None]],
             except Exception as exc:
                 log.warning("dependency check %s failed", name, exc_info=True)
                 results[name] = {"ok": False, "error": describe_error(exc)}
+            if name in OPTIONAL_CHECKS:
+                results[name]["required"] = False
             results[name]["ms"] = round((time.monotonic() - t0) * 1000)
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-    return {"ok": all(r["ok"] for r in results.values()), "checks": results}
+    ok = all(r["ok"] for r in results.values() if r.get("required", True))
+    return {"ok": ok, "checks": results}
 
 
 class DepsHealth:

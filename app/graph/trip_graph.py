@@ -46,6 +46,7 @@ from app.towns import CIRCUITS, DESTINATIONS, NOT_READY, PLACE_ALIASES  # noqa: 
 from app.usage import Meter, in_context, metered
 from ingest.schema import is_generic_name
 from mcp_server.client import LocalTools, ToolError
+from mcp_server.weather import travel_date
 
 log = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ HEAVY_RAIN_MM = 30.0  # forecast rain in a day that makes hill roads risky
 
 
 def _today() -> date:
-    return date.today()
+    return travel_date()
 
 
 def valid_start(value, today: date) -> date | None:

@@ -1,5 +1,5 @@
 """Travel dates and the weather agent."""
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from test_trip_graph import GOOD, HW, REQ, RK, FakeLLM, FakeRetriever, FakeStore
@@ -8,6 +8,7 @@ import app.graph.trip_graph as tgm
 from app.graph.render import day_date, weather_line
 from app.graph.trip_graph import TripPlanner, valid_start
 from mcp_server.client import LocalTools
+from mcp_server.weather import travel_date
 
 TODAY = date(2026, 11, 10)
 BOTH = f"{HW}+{RK}"
@@ -16,6 +17,10 @@ BOTH = f"{HW}+{RK}"
 @pytest.fixture(autouse=True)
 def fixed_today(monkeypatch):
     monkeypatch.setattr(tgm, "_today", lambda: TODAY)
+
+
+def test_travel_day_is_in_india_when_the_server_is_still_on_yesterday():
+    assert travel_date(datetime(2026, 11, 23, 20, 30, tzinfo=UTC)) == date(2026, 11, 24)
 
 
 def test_valid_start_rejects_past_far_future_and_junk():

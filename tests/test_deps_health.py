@@ -85,6 +85,19 @@ def test_unwired_services_are_skipped():
     assert describe_error(ValueError("x")) == "ValueError"
 
 
+def test_weather_failure_is_reported_without_failing_readiness(client, monkeypatch):
+    def down(*args, **kwargs):
+        raise RuntimeError("provider rate limit")
+
+    monkeypatch.setattr("mcp_server.weather.get_weather", down)
+    planner, trips, _ = services()
+    client.app.state.planner, client.app.state.trips = planner, trips
+    response = client.get("/health/deps")
+    assert response.status_code == 200
+    weather = response.json()["checks"]["weather"]
+    assert weather["ok"] is False and weather["required"] is False
+
+
 def test_endpoint_reports_503_when_a_service_is_down(client):
     planner, trips, _ = services(Unauthorized("nope"))
     client.app.state.planner, client.app.state.trips = planner, trips

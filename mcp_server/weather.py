@@ -3,7 +3,7 @@ otherwise the same dates one year earlier as a rough "typical" guide (clearly la
 import json
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import httpx
 
@@ -61,6 +61,11 @@ MET_USER_AGENT = "TravelBuddy/1.0 github.com/guniyal24/TravelBuddy"
 IST = timedelta(hours=5, minutes=30)
 
 
+def travel_date(now: datetime | None = None) -> date:
+    """Today's date at the destination, including on UTC-hosted servers."""
+    return (now or datetime.now(UTC)).astimezone(timezone(IST)).date()
+
+
 def fetch_met_uncached(lat: float, lon: float) -> dict:
     params = {"lat": round(lat, 4), "lon": round(lon, 4)}  # MET asks for at most 4 decimals
     r = httpx.get(MET, params=params, timeout=15, headers={"User-Agent": MET_USER_AGENT})
@@ -102,7 +107,7 @@ def get_weather(lat: float, lon: float, start: date, end: date, today: date | No
         raise ValueError("end must be on or after start")
     if (end - start).days > 30:
         raise ValueError("date range too long (max 31 days)")
-    today = today or date.today()
+    today = today or travel_date()
     base = {"latitude": lat, "longitude": lon, "daily": DAILY, "timezone": "Asia/Kolkata"}
 
     if end <= today + timedelta(days=MAX_FORECAST_DAYS - 1) and start >= today:
