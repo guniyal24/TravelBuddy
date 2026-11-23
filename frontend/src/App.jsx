@@ -24,6 +24,7 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [tab, setTab] = useState("trip");
   const [openTrip, setOpenTrip] = useState(null);
+  const [plannerVersion, setPlannerVersion] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
 
   useEffect(() => {
@@ -36,15 +37,21 @@ export default function App() {
   const [guestBusy, setGuestBusy] = useState(false);
 
   const closeAuth = useCallback(() => { setAuthMode(null); setNotice(""); }, []);
-  const logout = () => { clearToken(); setAuthed(false); setGuest(false); setTab("trip"); window.scrollTo(0, 0); };
+  const logout = () => { clearToken(); setAuthed(false); setGuest(false); setOpenTrip(null); setTab("trip"); window.scrollTo(0, 0); };
   const onExpired = () => {
     setAuthed(false);
+    setOpenTrip(null);
     setNotice(guest ? "Your guest session ended. Create a free account to keep your trips, or try again as a guest."
       : "Your session expired. Please log in again.");
     setAuthMode(guest ? "register" : "login");
     setGuest(false);
   };
   const go = (t) => { setTab(t); window.scrollTo({ top: 0 }); };
+  const newTrip = () => {
+    setOpenTrip(null);
+    setPlannerVersion((version) => version + 1);
+    go("trip");
+  };
   const signUp = () => { logout(); setAuthMode("register"); };
 
   async function tryAsGuest() {
@@ -112,10 +119,12 @@ export default function App() {
 
       <main className="container main">
         {/* all stay mounted so switching tabs does not lose a half-planned trip */}
-        <div hidden={tab !== "trip"}><Trip onExpired={onExpired} initialTrip={openTrip} /></div>
+        <div hidden={tab !== "trip"}>
+          <Trip key={plannerVersion} onExpired={onExpired} initialTrip={openTrip} />
+        </div>
         <div hidden={tab !== "trips"}>
           <MyTrips active={tab === "trips"} onExpired={onExpired}
-                   onOpen={(t) => { setOpenTrip(t); go("trip"); }} onPlan={() => go("trip")} />
+                   onOpen={(t) => { setOpenTrip(t); go("trip"); }} onPlan={newTrip} />
         </div>
         <div hidden={tab !== "chat"}><Chat onExpired={onExpired} /></div>
         <div hidden={tab !== "profile"}>

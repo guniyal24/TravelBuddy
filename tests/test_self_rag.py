@@ -114,7 +114,7 @@ def test_regenerates_once_when_ungrounded_with_feedback():
     assert "Hotel Z has a pool" in llm.complete_prompts[1]  # feedback passed to retry
 
 
-def test_adds_caveat_if_still_ungrounded_after_max_generations():
+def test_withholds_draft_if_still_ungrounded_after_max_generations():
     bad = {"grounded": False, "unsupported_claims": ["x"]}
     rag, _ = make(
         json_replies=[{"relevant_ids": ["a"]}, bad, bad],
@@ -123,7 +123,28 @@ def test_adds_caveat_if_still_ungrounded_after_max_generations():
     )
     s = rag.run("q")
     assert s["generations"] == 2 and s["grounded"] is False
-    assert "not be fully verified" in s["answer"]
+    assert s["abstained"] and s["answer"] == ABSTAIN_MESSAGE
+
+
+def test_missing_or_non_boolean_verdict_does_not_publish_the_draft():
+    rag, _ = make(
+        json_replies=[{"relevant_ids": ["a"]}, {}, {"grounded": "false"}],
+        completions=["first draft", "second draft"], retrievals=[[doc("a")]],
+    )
+    assert list(rag.get_answer("q", "s"))[-1] == ABSTAIN_MESSAGE
+
+
+def test_delivered_answer_links_citations_from_the_graph():
+    rag, _ = make(
+        json_replies=[{"relevant_ids": ["a"]}, {"grounded": True}],
+        completions=["Try Hotel A [a]."], retrievals=[[doc("a")]],
+    )
+    rag.store.fetch_entities = lambda _: {
+        "a": {"source_url": "https://en.wikivoyage.org/wiki/Rishikesh"},
+    }
+    assert list(rag.get_answer("q", "s"))[-1] == (
+        "Try Hotel A [Source 1](<https://en.wikivoyage.org/wiki/Rishikesh>)."
+    )
 
 
 def test_get_answer_matches_hybrid_interface_and_logs():

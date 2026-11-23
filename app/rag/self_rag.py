@@ -14,6 +14,7 @@ import logging
 import re
 from collections.abc import Generator
 from typing import Any, TypedDict
+from urllib.parse import urlsplit
 
 from langgraph.graph import END, START, StateGraph
 
@@ -26,6 +27,7 @@ MAX_RETRIEVALS = 2
 MAX_GENERATIONS = 2
 TOP_K = 12
 MAX_CONTEXT_DOCS = 6
+CITATION = re.compile(r"\[([a-z][a-z0-9_-]*)\](?!\()")
 
 ABSTAIN_MESSAGE_HI = (
     "मुझे इसकी भरोसेमंद जानकारी अपने उत्तराखंड डेटा में नहीं मिली, इसलिए मैं अंदाज़ा नहीं लगाऊँगा। "
@@ -99,6 +101,7 @@ class RAGState(TypedDict, total=False):
     docs: list[dict]
     relevant: list[dict]
     context: str
+    sources: dict[str, str]
     answer: str
     generations: int
     grounded: bool | None
@@ -127,6 +130,26 @@ def format_entity(doc: dict, ent: dict | None) -> str:
         bits.append(f"elevation: {round(ent['elevation_m'])} m")
     text = ent.get("description") or doc.get("text", "")
     return head + (" | " + "; ".join(bits) if bits else "") + f"\n  {text[:400]}"
+
+
+def link_citations(answer: str, sources: dict[str, str]) -> str:
+    numbers: dict[str, int] = {}
+
+    def link(match: re.Match) -> str:
+        entity_id = match[1]
+        url = sources.get(entity_id, "")
+        if not url or any(c.isspace() or c in "<>" for c in url):
+            return match[0]
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return match[0]
+        if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+            return match[0]
+        number = numbers.setdefault(entity_id, len(numbers) + 1)
+        return f"[Source {number}](<{url}>)"
+
+    return CITATION.sub(link, answer)
 
 
 class SelfRAG:
@@ -192,15 +215,21 @@ class SelfRAG:
         entities = self.store.fetch_entities(ids)
         blocks = [format_entity(d, entities.get(d["id"])) for d in top]
         names = {d["id"]: d["name"] for d in top}
+        sources = {i: e.get("source_url") for i, e in entities.items() if e.get("source_url")}
         facts = []
         for f in self.store.fetch_graph_context(ids):
             if f.get("rel") == "NEAR" and f.get("km") is not None and f["target_id"] not in names:
                 facts.append(f"- {names.get(f['source_id'], f['source_id'])} is {f['km']} km "
                              f"(straight line) from {f['name']} [{f['target_id']}]")
+                if f.get("source_url"):
+                    sources[f["target_id"]] = f["source_url"]
+                if len(facts) == 10:
+                    break
         context = "\n".join(blocks)
         if facts:
-            context += "\n\nNearby:\n" + "\n".join(facts[:10])
-        return {"context": context, "trace": [*state["trace"], f"expand: {len(top)} docs"]}
+            context += "\n\nNearby:\n" + "\n".join(facts)
+        return {"context": context, "sources": sources,
+                "trace": [*state["trace"], f"expand: {len(top)} docs"]}
 
     def _generate(self, state: RAGState) -> RAGState:
         messages = [{"role": "system", "content": GENERATE_SYSTEM}]
@@ -223,27 +252,28 @@ class SelfRAG:
             [{"role": "system", "content": CHECK_SYSTEM},
              {"role": "user",
               "content": f"CONTEXT:\n{state['context']}\n\nANSWER:\n{state['answer']}"}],
-            default={"grounded": True},
+            default={},
         )
-        grounded = bool(result.get("grounded", True))
-        claims = "; ".join(result.get("unsupported_claims") or [])
-        update: RAGState = {"grounded": grounded, "feedback": "" if grounded else claims,
-                            "trace": [*state["trace"], f"check: grounded={grounded}"]}
-        if not grounded and state["generations"] >= MAX_GENERATIONS:
-            update["answer"] = (state["answer"] + "\n\n(Note: some details may not be fully "
-                                "verified against my data. Please double-check before booking.)")
-        return update
+        grounded = result.get("grounded") is True
+        unsupported = result.get("unsupported_claims")
+        claims = "; ".join(c for c in unsupported if isinstance(c, str)) if isinstance(
+            unsupported, list) else ""
+        return {"grounded": grounded,
+                "feedback": "" if grounded else claims or "the draft could not be verified",
+                "trace": [*state["trace"], f"check: grounded={grounded}"]}
 
     def _route_after_check(self, state: RAGState) -> str:
-        if state["grounded"] or state["generations"] >= MAX_GENERATIONS:
+        if state["grounded"]:
             return "done"
-        return "retry"
+        return "abstain" if state["generations"] >= MAX_GENERATIONS else "retry"
 
     def _abstain(self, state: RAGState) -> RAGState:
         hindi = _is_hindi(state.get("question", ""))
+        reason = ("draft could not be verified" if state.get("generations")
+                  else "nothing relevant found")
         return {"answer": ABSTAIN_MESSAGE_HI if hindi else ABSTAIN_MESSAGE,
-                "abstained": True, "relevant": [], "grounded": True,
-                "trace": [*state["trace"], "abstain: nothing relevant found"]}
+                "abstained": True, "relevant": [], "grounded": state.get("grounded", True),
+                "trace": [*state["trace"], f"abstain: {reason}"]}
 
     # ---- graph ----
     def _build(self):
@@ -263,7 +293,7 @@ class SelfRAG:
         g.add_edge("expand", "generate")
         g.add_edge("generate", "check")
         g.add_conditional_edges("check", self._route_after_check,
-                                {"done": END, "retry": "generate"})
+                                {"done": END, "retry": "generate", "abstain": "abstain"})
         g.add_edge("abstain", END)
         return g.compile()
 
@@ -312,6 +342,6 @@ class SelfRAG:
             yield ERROR_MESSAGE
             return
         ids = [d["id"] for d in state.get("relevant", [])]
-        yield state["answer"]
+        yield link_citations(state["answer"], state.get("sources", {}))
         if hasattr(self.store, "log_interaction"):
             self.store.log_interaction(session_id, query, state["answer"], ids)

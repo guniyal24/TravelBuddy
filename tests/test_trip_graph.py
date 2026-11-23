@@ -1,5 +1,7 @@
+import pytest
+
 from app.graph.critic import fallback_plan, validate_plan
-from app.graph.trip_graph import TripPlanner
+from app.graph.trip_graph import PlanningUnavailable, TripPlanner
 
 
 def ent(i, typ, dest, name=None, tier=None, price="", lat=None, lon=None):
@@ -100,6 +102,15 @@ def test_fallback_plan_after_repeated_failures_is_valid_and_flagged():
     assert r["prompt"]["type"] == "approve"
     assert any("automatic plan" in w for w in r["prompt"]["warnings"])
     assert len(r["prompt"]["plan"]["days"]) == 3
+
+
+def test_invalid_fallback_is_not_shown_for_approval(monkeypatch):
+    monkeypatch.delitem(ENTS, "s_hw1")
+    tp, _ = make([REQ, {"days": []}, {"days": []}, {"days": []}])
+    tp.start("invalid-fallback", "x")
+
+    with pytest.raises(PlanningUnavailable, match="valid itinerary"):
+        tp.resume("invalid-fallback", f"{HW}+{RK}")
 
 
 def test_edit_request_replans_then_cancel_ends():

@@ -569,8 +569,9 @@ class TripPlanner:
         plan = self.llm.json(self.big, [{"role": "system", "content": PLAN_SYSTEM},
                                         {"role": "user", "content": user}], default={})
         plan = _apply_lock(_expand_aliases(plan, alias_to_id), locked)
-        plan = _one_stay_per_town(_fill_empty_days(plan, state["candidates"],
-                                                   {d["day"] for d in locked}))
+        locked_days = {d["day"] for d in locked}
+        plan = _one_stay_per_town(_fill_empty_days(plan, state["candidates"], locked_days),
+                                  locked_days)
         return {"plan": plan, "plan_attempts": state.get("plan_attempts", 0) + 1}
 
     # ---------------- critic ----------------
@@ -585,10 +586,13 @@ class TripPlanner:
         update: TripState = {"errors": errors, "warnings": warnings,
                              "feedback": "; ".join(errors)}
         if errors and state["plan_attempts"] >= MAX_PLAN_ATTEMPTS:
-            plan = _apply_lock(fallback_plan(req, state["destinations"], state["candidates"]),
-                               state.get("locked_days") or [])
+            plan = fallback_plan(req, state["destinations"], state["candidates"],
+                                 state.get("locked_days") or [])
             errors2, warnings2 = validate_plan(
                 plan, state["entities"], req, self._season, centres, self._transfer)
+            if errors2:
+                raise PlanningUnavailable("I couldn't build a valid itinerary from the available "
+                                          "listings. Try a different circuit or fewer days.")
             update = {"plan": plan, "errors": errors2, "feedback": "",
                       "warnings": [*warnings2, "The AI planner could not produce a valid plan, "
                                    "so a simple automatic plan was used."]}
@@ -744,9 +748,10 @@ class TripPlanner:
         """Fan out: one hotel agent per overnight town, plus the travel-info agent, all in
         parallel (LangGraph runs every Send of a step concurrently)."""
         req, plan = state["request"], state["plan"]
+        locked = {d["day"] for d in state.get("locked_days") or []}
         nights: dict[str, dict] = {}
         for d in plan["days"]:
-            if d["day"] < req["days"]:
+            if d["day"] < req["days"] and d["day"] not in locked:
                 n = nights.setdefault(d["destination"], {"nights": 0, "current": d.get("stay")})
                 n["nights"] += 1
         sends = []
@@ -795,10 +800,12 @@ class TripPlanner:
         re-render the plan."""
         offered = {t["dest"]: {o["stay_id"] for o in t["options"]}
                    for t in state["concierge"]["towns"]}
+        locked = {d["day"] for d in state.get("locked_days") or []}
         plan, changed = deepcopy(state["plan"]), False
         for d in plan["days"]:
             pick = (state.get("hotel_choice") or {}).get(d["destination"])
-            if (d["day"] < state["request"]["days"] and pick in offered.get(d["destination"], ())
+            if (d["day"] < state["request"]["days"] and d["day"] not in locked
+                    and pick in offered.get(d["destination"], ())
                     and pick != d.get("stay")):
                 d["stay"], changed = pick, True
         if not changed:
@@ -892,6 +899,11 @@ class TripPlanner:
             towns.append({"dest": t["dest"], "town": t["town"], "chosen": stays.get(t["dest"]),
                           "options": [{**o, "reviews": o["reviews"][:3]} for o in t["options"]],
                           "claims": t["claims"], "verified": t["verified"]})
+        researched = {t["dest"] for t in towns}
+        completed = {d["destination"] for d in state.get("locked_days") or [] if d.get("stay")}
+        previous = (state.get("structured") or {}).get("concierge") or {}
+        towns = [*(t for t in previous.get("towns", [])
+                   if t["dest"] in completed - researched), *towns]
         return {"towns": towns, "travel": con.get("travel") or {}}
 
     # ---------------- wiring ----------------
@@ -1077,7 +1089,7 @@ def _fill_empty_days(plan: dict, candidates: dict, skip: set[int] = frozenset())
     return {**plan, "days": out}
 
 
-def _one_stay_per_town(plan: dict) -> dict:
+def _one_stay_per_town(plan: dict, locked: set[int] = frozenset()) -> dict:
     """Consecutive nights in the same town keep the first night's stay: the LLM sometimes picks
     a new hotel each night, which no traveller wants."""
     if not isinstance(plan, dict) or not isinstance(plan.get("days"), list):
@@ -1085,7 +1097,7 @@ def _one_stay_per_town(plan: dict) -> dict:
     days, prev = [], None
     for d in plan["days"]:
         if (isinstance(d, dict) and isinstance(prev, dict) and d.get("stay") and prev.get("stay")
-                and d.get("destination") == prev.get("destination")):
+                and d.get("day") not in locked and d.get("destination") == prev.get("destination")):
             d = {**d, "stay": prev["stay"]}
         days.append(d)
         prev = d

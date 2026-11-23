@@ -109,13 +109,14 @@ def validate_plan(plan: dict, entities: dict[str, dict], request: dict, season_f
     return errors, warnings
 
 
-def fallback_plan(request: dict, destinations: list[str], candidates: dict[str, dict]) -> dict:
+def fallback_plan(request: dict, destinations: list[str], candidates: dict[str, dict],
+                  locked_days: list[dict] | None = None) -> dict:
     """Deterministic plan used if the LLM planner cannot produce a valid one."""
     n = request["days"]
     per = max(1, n // len(destinations))
-    days = []
-    used: set[str] = set()
-    for day in range(1, n + 1):
+    days = list(locked_days or [])
+    used = {stop for day in days for stop in day.get("stops", [])}
+    for day in range(len(days) + 1, n + 1):
         dest = destinations[min((day - 1) // per, len(destinations) - 1)]
         pool = candidates[dest]
         stops = [e["id"] for e in pool["stops"] if e["id"] not in used][:2]

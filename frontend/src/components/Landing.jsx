@@ -12,8 +12,8 @@ const SAMPLE = [
 ];
 
 const STATS = [
-  ["9", "towns you can plan"],
-  ["300+", "places and stays in the data"],
+  ["26", "towns you can plan"],
+  ["9", "featured towns to explore"],
   ["3", "languages: English, Hindi, Hinglish"],
   ["You", "approve every plan before it is saved"],
 ];

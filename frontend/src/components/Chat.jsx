@@ -4,8 +4,9 @@ import { chat } from "../api.js";
 import Icon from "./Icon.jsx";
 import { LogoMark } from "./Logo.jsx";
 
-// Answers cite sources as [entity_id]; hide those ids from readers.
-const stripIds = (t) => t.replace(/\s*\[[a-z]+(?:_[a-z0-9]+)+\]/g, "");
+const markdownComponents = {
+  a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+};
 
 const SUGGESTIONS = [
   "Where can I eat chole kulche in Haridwar?",
@@ -78,7 +79,7 @@ export default function Chat({ onExpired }) {
             <div className={`bubble ${m.role}`}>
               {m.role === "assistant"
                 ? (m.content
-                  ? <ReactMarkdown>{stripIds(m.content)}</ReactMarkdown>
+                  ? <ReactMarkdown components={markdownComponents}>{m.content}</ReactMarkdown>
                   : <span className="typing"><i /><i /><i /> <span className="muted">{status || "Thinking"}</span></span>)
                 : m.content}
             </div>

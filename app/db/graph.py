@@ -41,7 +41,8 @@ class GraphStore:
         UNWIND $node_ids AS nid
         MATCH (n:Entity {id: nid})-[r]-(m:Entity)
         RETURN nid AS source_id, type(r) AS rel, m.id AS target_id, m.name AS name,
-               COALESCE(left(m.description, 200), "") AS desc, r.distance_km AS km
+               COALESCE(left(m.description, 200), "") AS desc, r.distance_km AS km,
+               m.source_url AS source_url
         ORDER BY r.distance_km
         LIMIT $limit
         """

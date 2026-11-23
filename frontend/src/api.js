@@ -8,15 +8,17 @@ const store = {
 export const getToken = store.get;
 export const clearToken = () => store.set(null);
 
-// Reads the (unverified) token payload only to adapt the UI; the server checks the signature.
-export function isGuest() {
+// Used for display and local cache filtering. The API verifies the signature before access.
+function tokenPayload() {
   const t = store.get();
-  if (!t) return false;
+  if (!t) return null;
   try {
     const b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(b64)).guest === true;
-  } catch { return false; }
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch { return null; }
 }
+export const isGuest = () => tokenPayload()?.guest === true;
 
 async function readError(res) {
   if (res.status === 429) return "You're sending requests too fast. Please wait a minute.";
@@ -141,13 +143,17 @@ const KEEP = 8;
 function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* full or private mode */ } }
 export function cacheTrip(trip) {
-  if (!trip?.trip_id) return;
+  const owner = tokenPayload()?.sub;
+  if (!owner || trip?.owner !== owner || !trip.trip_id) return;
   const ids = [trip.trip_id, ...(lsGet("trip-ids") || []).filter((i) => i !== trip.trip_id)].slice(0, KEEP);
   lsSet("trip:" + trip.trip_id, trip);
   lsSet("trip-ids", ids);
 }
 export function cachedTrips() {
-  return (lsGet("trip-ids") || []).map((id) => lsGet("trip:" + id)).filter(Boolean);
+  const owner = tokenPayload()?.sub;
+  if (!owner) return [];
+  return (lsGet("trip-ids") || []).map((id) => lsGet("trip:" + id))
+    .filter((trip) => trip?.owner === owner);
 }
 
 // Streams the answer text; calls onToken with each decoded chunk.

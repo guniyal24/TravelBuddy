@@ -83,3 +83,20 @@ build and the eval gate pass on `main`.
 - Guest mode is capped per IP (`GUEST_SESSIONS_PER_IP_PER_HOUR`) and globally
   (`GUEST_SESSIONS_PER_DAY`, default 300). Set `GUEST_ENABLED=false` to turn it off.
 - Neon, Render and Vercel free tiers are enough for a portfolio demo.
+
+## Replace an expired Neo4j Aura trial
+
+1. Open the [Aura console](https://console.neo4j.io/) and create an **AuraDB Free** instance or
+   resume an existing one. Save its database credentials when Neo4j offers the download.
+2. If you need the old account records, check the suspended instance for an exportable snapshot.
+   Restore it into an empty instance before importing. The TravelBuddy importer loads places and
+   relationships. Account records and chat logs are stored separately in Neo4j.
+3. Set the new `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD` in your local `.env`. Run
+   `python -m ingest.load neo4j --dry-run`, then `python -m ingest.load neo4j` to load the existing
+   `data/processed/entities.json`. If the Pinecone index already contains vectors for that
+   dataset, keep using it.
+4. Update the same Neo4j settings in Render and in GitHub Actions secrets if you use the live
+   eval job. Redeploy the API, then check `/health/deps` and complete a guest itinerary.
+
+AuraDB Free can pause after 72 hours of inactivity. Resume it in the console before a demo if
+the status shows **Paused**. [Neo4j instance actions](https://neo4j.com/docs/aura/managing-instances/instance-actions/)

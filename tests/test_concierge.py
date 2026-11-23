@@ -229,6 +229,26 @@ def test_keeping_hotels_leaves_the_plan_unchanged(two_haridwar_hotels):
     assert done["state"]["structured"]["plan"] == plan
 
 
+def test_replan_hotel_selection_preserves_completed_nights(two_haridwar_hotels):
+    tools = FakeTools()
+    tp = TripPlanner(ConciergeLLM([REQ, GOOD, GOOD]), FakeRetriever(), FakeStore(), "s", "b",
+                     tools=tools, concierge=True)
+    tp.start("replan", "x")
+    tp.resume("replan", BOTH)
+    tp.resume("replan", {"action": "approve"})
+    first = tp.resume("replan", {"choices": {HW: "s_hw2"}})["state"]["structured"]
+    assert first["plan"]["days"][0]["stay"] == "s_hw2"
+    tools.review_calls.clear()
+
+    tp.replan("replan", 2, "less walking")
+    result = tp.resume("replan", {"action": "approve"})
+    assert result["status"] == "done"
+    saved = result["state"]["structured"]
+    assert saved["plan"]["days"][0] == first["plan"]["days"][0]
+    assert tools.review_calls == ["Backpacker Hostel"]
+    assert saved["concierge"]["towns"][0]["chosen"] == "s_hw2"
+
+
 def test_travel_notes_keep_only_verified_claims_with_urls(two_haridwar_hotels):
     tp, _ = _planner(search_on=True)
     tp.start("c3", "x")

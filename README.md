@@ -1,217 +1,169 @@
-<p align="center"><img src="frontend/public/logo.png" alt="TravelBuddy" height="64"></p>
+<p align="center"><img src="frontend/public/logo.png" alt="TravelBuddy" height="72"></p>
 
-<h3 align="center">An AI trip planner for Uttarakhand that shows its work</h3>
+<h1 align="center">TravelBuddy</h1>
 
 <p align="center">
-  <b>Live demo:</b> <i>coming soon</i> · try it as a guest, no sign-up ·
-  <a href="#evaluation">Evaluation</a> · <a href="#architecture">Architecture</a> · <a href="DEPLOY.md">Deploy</a>
+  An Uttarakhand trip planner with sourced places, live planning progress, and a plan you can review before saving.
 </p>
 
-![CI](https://github.com/guniyal24/TravelBuddy/actions/workflows/ci.yml/badge.svg)
+<p align="center">
+  <a href="https://github.com/guniyal24/TravelBuddy/actions/workflows/ci.yml"><img alt="GitHub Actions CI" src="https://github.com/guniyal24/TravelBuddy/actions/workflows/ci.yml/badge.svg"></a>
+</p>
 
----
+<p align="center">
+  <a href="#try-a-trip">Try a trip</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#evaluation">Evaluation</a> ·
+  <a href="#run-locally">Run locally</a> ·
+  <a href="DEPLOY.md">Deploy</a>
+</p>
 
-Describe a trip in plain English, Hindi or Hinglish (*"Nainital aur Almora, 4 din, vegetarian
-khana, 2 log, December"*). TravelBuddy proposes circuits that fit the season, builds a
-day-by-day plan from **real listings only**, checks it with rule-based agents, prices it as an
-honest range, and **waits for your approval** before anything is final. You can watch every
-agent work, live.
+TravelBuddy turns a request in English, Hindi, or Hinglish into a day-by-day trip through Garhwal or Kumaon. It retrieves hotels, restaurants, and activities from a regional knowledge base, checks the itinerary against travel rules, and shows price ranges with their assumptions. Travellers can try it as a guest, see which agents are working, and approve or edit the itinerary.
 
-## The problem
+## Try a trip
 
-Generic chatbots plan hill trips confidently and wrongly. In this project's own evaluation, an
-LLM without retrieval **named places that are not in the data in 85% of answers** and invented
-prices or timings for every question it could not answer. In the mountains that costs real money
-and can be unsafe (altitude, monsoon roads, Char Dham registration).
+Open the app at [localhost:5173](http://localhost:5173) after starting both services. Choose **Try it now, no sign-up** and paste:
 
-TravelBuddy's rule: **the LLM composes, code checks, the human decides.**
+> Three days in Haridwar and Rishikesh for two people in March. We prefer vegetarian food, a budget hotel, and a relaxed pace.
 
-## What it does
+1. **Describe and choose.** Answer any follow-up questions, then pick a circuit. Season guidance appears before you commit to the route.
+2. **Review the itinerary.** Open the agent trace, timeline, and map. Check the budget breakdown, transfer estimates, and advisory notes. Ask for a change or approve the plan.
+3. **Choose a stay.** When alternatives are available, compare hotels by town. With Google Places configured, cards show ratings and attributed review excerpts. Your hotel selection updates the cost estimate.
+4. **Save and use the plan.** Open **My trips**, tick booking tasks, and export a PDF, text summary, or `.ics` calendar. Booking links take you to the relevant external sites.
+5. **Replan from a future day.** Pick a day and describe what changed. The itinerary and hotel selection keep completed days fixed.
 
-| | |
+The **Ask** tab runs a separate Q&A workflow. Try “Where can I do yoga in Rishikesh?” and open a source link to inspect its listing.
+
+## What the app covers
+
+| Feature | How it works |
 |---|---|
-| **Plans from a knowledge graph** | 721 sourced places in 26 towns (Wikivoyage and OpenStreetMap) in Neo4j + Pinecone. The planner may only use ids it was given; a Critic rejects anything else. |
-| **Human in the loop** | Pick a circuit, approve or ask for changes ("less walking", "add a yoga class"), re-plan mid-trip from any day. Paused plans survive server restarts. |
-| **Live agent trace** | Each agent's real work streams to the UI (Server-Sent Events): what it found, what the Critic rejected, timings. |
-| **Concierge** | After you approve, hotel agents run in parallel, one per overnight town. They read Google reviews of that town's hotels, an analyst extracts pros and cons **with exact quotes** (checked in code; 95% survive), a code ranker orders them, and you pick. The plan and cost update. |
-| **Agent memory** | After you approve a trip, a memory agent keeps the lasting preferences you stated ("avoid long drives"), each with your **exact words** (checked in code), plus a short episode of the trip. Next time they shape the plan and towns you visited are labelled. You can see and delete every memory. Contact, ID and payment details are never stored. |
-| **Safety agent** | Altitude-gain rules, high-altitude health notes, monthly advisories with official links to confirm. |
-| **Honest costs** | Ranges, never single numbers; every line says if it is a listing price or an assumption. |
-| **Grounded Q&A** | Self-RAG answers with citations, and declines instead of guessing. |
-| **Dates, weather and roads** | Say "from next Friday" and the plan gets real dates. A weather agent checks every day's town (live forecast within 16 days, otherwise a labelled typical estimate) and flags heavy rain with a re-plan suggestion. Road times come from OpenStreetMap routing, calibrated against hand-checked routes (distances within 4%). |
-| **Hindi / Hinglish** | Requests, plans and answers follow the traveller's language. |
-| **Try without an account** | One-click guest mode with per-IP and daily cost caps. |
-| **Export & offline** | WhatsApp text, PDF, calendar (.ics), booking checklist; opened trips work offline (PWA). |
+| Regional knowledge base | The planner covers 26 towns. An ingestion pipeline collects Wikivoyage and OpenStreetMap listings, records provenance, and builds geographic relationships. |
+| Itinerary validation | A deterministic Critic checks day order, listing IDs and types, town membership, duplicate stops, and overnight stays. Failed drafts are retried. A rule-based fallback goes through the same checks. |
+| Routing, weather, and cost | Inter-town routing uses curated routes or a calibrated OSRM matrix. Dated trips can get forecasts or a labelled historical guide. Costs use ranges marked with their source or assumption. |
+| Hotel concierge | LangGraph fans out research by town and gathers optional Tavily travel notes. A code score combines available ratings, review counts, tier, price, and review analysis. The verifier checks that each displayed pro or con cites an excerpt from its attributed review. |
+| Traveller memory | LangGraph keeps the state of an in-progress trip. Approved trips can update preferences and past-trip memories, which travellers can view and delete. |
+| Exports and offline access | The itinerary can be exported as text, PDF, or calendar events. The production PWA can reopen trips cached in the current session’s account context. |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    U([Traveller]) -->|free text| I[Intake<br/><i>LLM + code</i>]
-    I -->|missing details?| U
-    I --> A[Advisor<br/><i>season + named towns</i>]
-    A -->|choose circuit| U
-    A --> R[Research<br/><i>hybrid retrieval</i>]
-    R --> S{{Supervisor}}
-    S --> ST[Stay agent]
-    S --> FD[Food agent]
-    S --> TR[Transport agent]
-    ST & FD & TR --> P[Planner<br/><i>LLM</i>]
-    P --> C[Critic<br/><i>rules</i>]
-    C -->|errors, retry| P
-    C --> SF[Safety agent]
-    SF --> CO[Cost engine]
-    CO -->|approve / edit / cancel| U
-    U -->|approve| CG{{Concierge}}
-    CG --> H1[Hotel agent<br/><i>town 1</i>]
-    CG --> H2[Hotel agent<br/><i>town 2</i>]
-    CG --> TI[Travel info<br/><i>web search</i>]
-    H1 & H2 & TI --> RK[Ranker<br/><i>code</i>]
-    RK -->|pick hotels| U
-    U -->|confirm| F[Booking checklist]
-
-    subgraph MCP["Own MCP server"]
-      T1[estimate_budget] ~~~ T2[check_season] ~~~ T3[check_altitude_plan]
-      T4[get_weather] ~~~ T5[get_transport] ~~~ T6[check_conditions]
-      T7[place_reviews] ~~~ T8[web_search]
-    end
-    TR & SF & CO & H1 & H2 & TI -.tools.-> MCP
+    U[React app] --> API[FastAPI]
+    API -->|Plan and resume| G[LangGraph trip planner]
+    API -->|Ask a question| Q[Self-RAG workflow]
+    G --> R[Retrieve listings]
+    Q --> R
+    R --> P[(Pinecone vectors)]
+    R --> N[(Neo4j knowledge graph)]
+    G --> C[Draft and validate itinerary]
+    C --> A[Traveller approval]
+    A --> H[Hotel research and selection]
+    H --> S[(Saved trips and checkpoints)]
+    G --> T[MCP tools]
+    Q --> V[Grade evidence and verify answer]
 ```
 
-- **LangGraph** state machine with `interrupt()` for human decisions and a durable checkpointer
-  (Postgres in production, SQLite locally): short-term memory for a trip in progress.
-- **Long-term memory** on LangGraph's `BaseStore` (`PostgresStore` / `SqliteStore`), namespaced
-  per traveller: semantic memories (preferences) and episodic memories (past trips), learned
-  only from approved trips, recalled at intake.
-- **Multi-agent:** Stay, Food and Transport agents run in parallel; the Critic, Safety agent
-  and cost engine are deterministic code, so their output is testable. After approval the
-  Concierge fans out with LangGraph `Send`: one hotel agent per overnight town plus a
-  travel-info agent, all concurrently.
-- **Untrusted content:** reviews and web pages reach the LLM only inside a delimited block
-  marked as data, the LLM can only fill a fixed JSON shape, every quote is verified against its
-  source in code, and ranking never depends on LLM text.
-- **MCP:** the planner reaches its tools through a real MCP client, in-process or over stdio.
-  The same server works in any MCP host: `python -m mcp_server.server`.
-- **Self-RAG** for Q&A: retrieve → grade → rewrite → answer → verify grounding → or decline.
-- **Hybrid retrieval:** Pinecone vectors (bge-m3) + Neo4j graph context.
+- **Planner.** Intake collects trip dates, party size, interests, and constraints. The advisor suggests a circuit. Research retrieves candidates from Pinecone and looks up full Neo4j records. Stay, food, and transport specialists prepare the candidates before the LLM drafts an itinerary. The planner runs the Critic, season and altitude checks, weather lookup, and range-based pricing before asking for approval.
+- **Human approval and live progress.** LangGraph interrupts pause the workflow for missing details, circuit choice, itinerary approval, and hotel selection. FastAPI streams step updates using Server-Sent Events. PostgreSQL or SQLite stores the checkpoint and approved trip.
+- **Q&A.** The workflow retrieves and grades candidates, rewrites an unproductive query once, enriches the context with the graph, then drafts and checks the response. An unverified draft gets one retry before the workflow abstains. Source links come from the retrieved records.
+- **Tooling.** A reusable MCP server exposes budget, season, altitude, weather, transport, conditions, review, and web-search tools. The application can use it in-process or via stdio. [MCP setup](mcp_server/README.md)
 
 ## Evaluation
 
-Three reports, all regenerated by commands in [`eval/`](eval/README.md), plus a CI gate.
+The figures below come from the dated benchmark reports in the repository. The Q&A suite has **104 questions**, including 79 answerable and 25 unanswerable questions in English, Hindi, and Hinglish. [Full Q&A report and confidence intervals](eval/RESULTS.md)
 
-**1. Answers: do they come from our data, and decline when it isn't there?** 104 questions (79
-answerable, 25 not: towns outside the data, live facts, false premises, prompt injection), in
-English, Hindi and Hinglish. Rates with 95% intervals; full table in
-[`eval/RESULTS.md`](eval/RESULTS.md).
+| System | Retrieval hit rate | Answers naming places outside the data | Answers answerable questions | Declines unanswerable questions |
+|---|---:|---:|---:|---:|
+| LLM only | — | 73% | 100% | 16% |
+| Plain RAG | 87% | 0% | 59% | 100% |
+| Self-RAG | 96% | 1% | 97% | 100% |
 
-| System | Retrieval hit@k | Names places not in our data ↓ | Answers the question | Declines when it can't know | Invents specifics ↓ |
-|---|---|---|---|---|---|
-| LLM only | n/a | **73%** | 100% | 16% | **80%** |
-| Plain RAG | 87% | 0% | 59% | 100% | 0% |
-| **Self-RAG** | **96%** | **1%** | **97%** | **100%** | **0%** |
+- **Planner validation.** All 30 scenarios reached review and passed the applicable plan checks. The first draft passed the Critic in 90% of scenarios. Disabling the Critic let two errors through, an unknown place and a meal in the wrong town. [Plan report](eval/PLANS.md) · [Ablations](eval/ABLATIONS.md)
+- **Time and cost.** Median time to itinerary review was **17 seconds**, and median estimated LLM fees were **₹0.01**. These measurements cover the planner up to review. Optional hotel research and external provider charges have separate costs. [Plan report](eval/PLANS.md)
+- **Judge reliability.** A checklist jury uses three model families, repeated votes, and cached verdicts. On 30 answers judged five times, headline verdicts changed on 0–3% of answers. The report describes where the rubric was less stable. [Judge reliability](eval/RELIABILITY.md)
+- **Concierge and safeguards.** In the recorded hotel benchmark, 92% of proposed claims passed the quote check. The recorded adversarial suite reports its outcomes separately. [Hotel research](eval/CONCIERGE.md) · [Adversarial evaluation](eval/REDTEAM.md)
 
-A plain LLM answers everything and makes up most of it. Plain RAG is safe but answers only
-59% of what it could. Self-RAG keeps the safety and answers 97%, including in Hindi.
-
-**2. Plans: are they valid for what was asked?** 30 trip requests through the real planner,
-every check computed in code ([`eval/PLANS.md`](eval/PLANS.md)): 100% reach approval with the
-exact day count, every named town, meals and stops in the right town, a stay every night, veg
-respected, budgets flagged, health notes above 2,500 m, and no rule-based fallback. The LLM's
-first draft passes the Critic 90% of the time; the Critic catches the rest.
-
-**3. Can the judge be trusted?** ([`eval/RELIABILITY.md`](eval/RELIABILITY.md)) The judge is a
-jury of three model families (Llama, Qwen, Gemma) answering yes/no checklists, with named
-places verified in code and verdicts cached for exact reproducibility. Re-judging 30 answers 5
-times: headline verdicts flip on 0-3% of answers. One checklist item (`on_topic`) flips on 23%,
-all on polite declines, a rubric ambiguity that is next to fix. Agreement with human labels
-(Cohen's kappa) is measured with `python -m eval.reliability label` and `agreement`.
-
-**4. Does each component earn its place?** ([`eval/ABLATIONS.md`](eval/ABLATIONS.md)) Switched
-off one at a time on the same trips: without the Critic, **2 of 30** trips reach the traveller
-with an error (a place not in our data, a meal in the wrong town); without the Food agent,
-**2 of 5** vegetarian trips include meat or bar listings. With both: 0.
-
-**5. Red team and hotel research:** 13 of 13 attacks defended
-([`eval/REDTEAM.md`](eval/REDTEAM.md)); 92% of review claims verified across 26 towns
-([`eval/CONCIERGE.md`](eval/CONCIERGE.md)).
-
-**CI gate:** `eval/gate.py` fails the build if answer or plan quality regresses, or if any
-judgement is incomplete; the red-team suite must pass too.
-
-## Engineering
-
-- **Cost and speed, measured:** a trip costs about **₹0.01 in LLM fees** at the median
-  (₹0.04 at the 90th percentile) and the agents take **17 s** at the median to produce a
-  plan ready for review ([`eval/PLANS.md`](eval/PLANS.md)). Every run is metered per model
-  (`app/usage.py`), saved per trip, and published in aggregate at `GET /api/stats`; the live
-  trace shows each trip's calls, tokens and cost. Hindi and Hinglish output is translated in
-  parallel sections, about 5x faster than one long call (17.6 s to 3.6 s median).
-- **Red team: 13 of 13 attacks defended** on the live system (prompt extraction, secrets,
-  other users' data, jailbreaks, fake context, HTML injection, planner injection;
-  [`eval/REDTEAM.md`](eval/REDTEAM.md)), checked in code wherever possible and gated in CI.
-- **260 tests** (pytest), ruff, CI on every push, storage tests against real Postgres in CI.
-- Guardrails: size limits on every request, per-user and guest rate limits (Redis, in-memory
-  fallback), JWT auth, CORS, guest sessions capped per IP and per day, daily caps on Google and
-  web-search calls.
-- Graceful degradation: tool failures become "unknown", never invented values; a store outage
-  stops planning with a clear message instead of an empty plan; a rule-based fallback plan if
-  the LLM cannot produce a valid one in 3 attempts.
-- Observability: the live agent trace and per-trip usage are built in; every LLM call can also
-  be traced to Langfuse by setting its keys (optional, not exercised in this repo's tests).
-- Data pipeline (`ingest/`) with provenance and confidence on every fact, and licence-aware
-  handling of Google-sourced data.
-
-## More
-
-- [Technical write-up (draft)](docs/blog-draft.md): what made the agents reliable, and the bugs
-  that only real conditions found
-- [Use the MCP server from Cursor or any MCP host](mcp_server/README.md)
-- [Portfolio kit](docs/PORTFOLIO.md): resume bullets, interview talking points, a demo script
-
-## Tech stack
-
-LangGraph · MCP · Self-RAG · Neo4j · Pinecone · DeepInfra (Mistral Small, Llama 3.3 70B judge,
-bge-m3 embeddings) · FastAPI · Postgres · Redis · React + Vite · Leaflet · GitHub Actions ·
-Docker · Render · Vercel
+GitHub Actions runs Python tests with PostgreSQL, frontend builds, a Docker build, and live evaluation gates when the required provider secrets are available. [Evaluation commands](eval/README.md) · [CI workflow](.github/workflows/ci.yml)
 
 ## Run locally
 
+Use Python 3.11 or newer and Node.js. For live planning, have a Neo4j database, a Pinecone index, and a DeepInfra key or compatible model provider. AuraDB Free can host the project’s travel graph. An idle Free instance may need to be resumed in the Aura console.
+
+### Set up the backend
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env            # add your keys
-pytest -q
-uvicorn app.api.asgi:app --reload --port 8000
-
-cd frontend && npm install && npm run dev   # http://localhost:5173
+test -f .env || cp .env.example .env
 ```
 
-Optional: `TEST_DATABASE_URL=postgresql://...` runs the storage tests against Postgres too.
-To rebuild the knowledge base: `python -m ingest.build`, then `python -m ingest.load neo4j` and
-`python -m ingest.load pinecone`. Deploying: see [DEPLOY.md](DEPLOY.md).
+| Set in `.env` | Purpose |
+|---|---|
+| `SECRET_KEY` | Private key used to sign account and guest tokens. |
+| `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` | URI and database credentials for the same Neo4j instance. Use `NEO4J_DATABASE=neo4j` for the default Aura database. |
+| `PINECONE_API_KEY`, `PINECONE_INDEX_NAME` | Vector search credentials and index. The default embedding model uses 1,024 dimensions. |
+| `DEEPINFRA_API_KEY` | Model and embedding calls with the default provider configuration. |
+| `DATABASE_URL` | Optional PostgreSQL URL for trips, profiles, checkpoints, and memory. Local development defaults to SQLite. |
+| `GOOGLE_PLACES_API_KEY`, `TAVILY_API_KEY` | Optional hotel reviews and current travel notes. Review lookups can incur provider charges. |
 
-## Layout
+### Load the knowledge base
 
+Reuse `data/processed/entities.json` if you already have the generated dataset. A fresh checkout can build it with `python -m ingest.build`.
+
+```bash
+python -m ingest.load neo4j --dry-run
+python -m ingest.load neo4j
+python -m ingest.load pinecone
 ```
-app/api      FastAPI routes, auth, guest mode, rate limits, SSE streaming
-app/graph    LangGraph trip planner, agents, Critic, live trace
-app/rag      Self-RAG and hybrid retrieval
-app/rules    Season, altitude and advisory checks
-app/cost     Deterministic cost engine
-app/trips    Saved trips and profiles (SQLite or Postgres)
-mcp_server/  Own MCP server and client
-ingest/      Data pipeline: Wikivoyage, OpenStreetMap, Open-Meteo
-eval/        Golden set, metrics, CI gate
-frontend/    React app (PWA)
+
+If you are replacing only Neo4j and Pinecone already contains embeddings for the same dataset, run the Neo4j commands and keep the existing index. The loader upserts the travel graph. On a fresh instance, account records from another Neo4j database require a backup restore. [Deployment and recovery](DEPLOY.md)
+
+### Start both services
+
+```bash
+# Terminal 1, from the repository root
+.venv/bin/python -m uvicorn app.api.asgi:app --reload --port 8000
 ```
 
-## Roadmap
+```bash
+# Terminal 2, from the repository root
+cd frontend
+npm ci
+npm run dev
+```
 
-1. Reliable LLM-as-judge: checklists, a multi-model jury, human-label agreement.
-2. Tighten the judge's `on_topic` rubric for polite declines; collect human labels for kappa.
+- [Website](http://localhost:5173) · [API documentation](http://localhost:8000/docs)
+- `GET /health` checks whether the API is running. `GET /health/deps` probes the configured graph, vector index, models, trip storage, and weather service.
 
-## Data and licences
+### Run checks
 
-Wikivoyage (CC BY-SA 4.0), OpenStreetMap contributors (ODbL), Open-Meteo. Generated data in
-`data/processed/` is git-ignored. Google-sourced coordinates are never committed or published.
-A planning aid only: check weather, road and permit advisories before you travel.
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/ruff check .
+npm --prefix frontend run build
+```
+
+Set `TEST_DATABASE_URL` to a dedicated UTF-8 test database to include PostgreSQL storage and restart tests. The live evaluation commands use the configured model and retrieval providers. [Evaluation instructions](eval/README.md)
+
+## Repository map
+
+| Path | What to look for |
+|---|---|
+| [`frontend/`](frontend/) | React interface, Leaflet, planner trace, saved trips, and PWA assets |
+| [`app/api/`](app/api/) | FastAPI, guest sessions, rate limits, ownership checks, and streaming |
+| [`app/graph/`](app/graph/) | LangGraph workflow, specialists, Critic, hotel research, and timelines |
+| [`app/rag/`](app/rag/) | Vector search, graph enrichment, and Self-RAG |
+| [`app/rules/`](app/rules/) and [`app/cost/`](app/cost/) | Deterministic altitude, season, advisory, and budget rules |
+| [`ingest/`](ingest/) | Source collection, geocoding, provenance, graph and vector loaders |
+| [`mcp_server/`](mcp_server/) | Travel tools and MCP transports |
+| [`eval/`](eval/) and [`tests/`](tests/) | Benchmarks, quality gates, and automated regressions |
+
+[Portfolio notes and walkthrough](docs/PORTFOLIO.md) · [Engineering write-up](docs/blog-draft.md) · [Deployment guide](DEPLOY.md)
+
+## Data and attribution
+
+Listings draw on Wikivoyage (CC BY-SA 4.0) and OpenStreetMap contributors (ODbL). Weather uses Open-Meteo with a MET Norway fallback. The source pipeline stores attribution, and the landing page includes credits for its town photography.
+
+TravelBuddy is a planning aid. Confirm departure times, fares, opening hours, permits, and current travel advisories with the relevant operators.
