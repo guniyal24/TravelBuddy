@@ -7,11 +7,18 @@
 </p>
 
 <p align="center">
+  <a href="https://travelbuddy-5md.pages.dev/"><img alt="Launch the TravelBuddy live demo" src="https://img.shields.io/badge/TravelBuddy-Launch_live_demo-0F766E?style=for-the-badge"></a>
+  <br>
+  <a href="https://travelbuddy-5md.pages.dev/"><strong>travelbuddy-5md.pages.dev</strong></a>
+  <br>
+  Try it as a guest, no sign-up needed.
+</p>
+
+<p align="center">
   <a href="https://github.com/guniyal24/TravelBuddy/actions/workflows/ci.yml"><img alt="GitHub Actions CI" src="https://github.com/guniyal24/TravelBuddy/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
 <p align="center">
-  <a href="https://travelbuddy-5md.pages.dev/">Live demo</a> ·
   <a href="#try-a-trip">Try a trip</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#evaluation">Evaluation</a> ·
