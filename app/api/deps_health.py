@@ -38,7 +38,10 @@ def build_checks(planner, trips) -> dict[str, Callable[[], dict | None]]:
         checks["database"] = lambda: db.query("SELECT 1", ()) and None
     store = getattr(planner, "store", None)
     driver = getattr(store, "driver", None)
-    if driver is not None:
+    readiness = getattr(store, "readiness", None)
+    if readiness is not None:
+        checks["graph"] = readiness
+    elif driver is not None:
         checks["graph"] = lambda: driver.verify_connectivity()
     retriever = getattr(planner, "retriever", None)
     index = getattr(retriever, "index", None)

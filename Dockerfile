@@ -8,6 +8,7 @@ COPY mcp_server ./mcp_server
 COPY ingest ./ingest
 COPY data/curated ./data/curated
 COPY data/seeds ./data/seeds
+COPY data/snapshot ./data/snapshot
 EXPOSE 8000
 # Trust the host's proxy for X-Forwarded-For so per-IP guest limits see the visitor's address.
 CMD ["sh", "-c", "uvicorn app.api.asgi:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

@@ -100,3 +100,15 @@ build and the eval gate pass on `main`.
 
 AuraDB Free can pause after 72 hours of inactivity. Resume it in the console before a demo if
 the status shows **Paused**. [Neo4j instance actions](https://neo4j.com/docs/aura/managing-instances/instance-actions/)
+
+### Guest planning during an Aura outage
+
+The API image bundles an attributed listing snapshot. If Aura is unreachable or rejects the
+database login at startup, guest planning and Q&A can use this snapshot with the configured
+Pinecone index and model provider. In `/health/deps`, `graph.mode` reports `snapshot` and
+`graph.accounts_available` is false. Restart the API after restoring Aura credentials to return
+to the live graph.
+
+After refreshing the live dataset, run `python -m ingest.snapshot` to update the bundled copy.
+The snapshot retains source URLs and excludes Google-sourced coordinates and their derived
+distances. The Render Free API can still cold start after an idle period.

@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="https://travelbuddy-5md.pages.dev/">Live demo</a> ·
   <a href="#try-a-trip">Try a trip</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#evaluation">Evaluation</a> ·
@@ -22,7 +23,7 @@ TravelBuddy turns a request in English, Hindi, or Hinglish into a day-by-day tri
 
 ## Try a trip
 
-Open the app at [localhost:5173](http://localhost:5173) after starting both services. Choose **Try it now, no sign-up** and paste:
+Open the [live demo](https://travelbuddy-5md.pages.dev/) or the [local app](http://localhost:5173) after starting both services. Choose **Try it now, no sign-up** and paste:
 
 > Three days in Haridwar and Rishikesh for two people in March. We prefer vegetarian food, a budget hotel, and a relaxed pace.
 
@@ -88,7 +89,7 @@ GitHub Actions runs Python tests with PostgreSQL, frontend builds, a Docker buil
 
 ## Run locally
 
-Use Python 3.11 or newer and Node.js. For live planning, have a Neo4j database, a Pinecone index, and a DeepInfra key or compatible model provider. AuraDB Free can host the project’s travel graph. An idle Free instance may need to be resumed in the Aura console.
+Use Python 3.11 or newer and Node.js. For live planning, have a Neo4j database, a Pinecone index, and a DeepInfra key or compatible model provider. AuraDB Free can host the project’s travel graph. An idle Free instance may need to be resumed in the Aura console. If Neo4j is unavailable at startup, the API uses a bundled snapshot for guest planning and Q&A. Account sign-in requires the live graph.
 
 ### Set up the backend
 

@@ -3,14 +3,31 @@ import logging
 from typing import Any
 
 from neo4j import GraphDatabase
+from neo4j.exceptions import AuthError, ConfigurationError, ServiceUnavailable, SessionExpired
 
 log = logging.getLogger(__name__)
 
 
+UNAVAILABLE = (AuthError, ConfigurationError, ServiceUnavailable, SessionExpired)
+
+
+class AccountStoreUnavailable(Exception):
+    """Registered accounts require the live graph."""
+
+
 class GraphStore:
     def __init__(self, uri: str, user: str, password: str, database: str = "neo4j"):
-        self.driver = GraphDatabase.driver(uri, auth=(user, password), database=database)
+        self.driver = GraphDatabase.driver(uri, auth=(user, password), database=database,
+                                           connection_timeout=5, connection_acquisition_timeout=8)
+        try:
+            self.driver.verify_connectivity()
+        except UNAVAILABLE:
+            self.driver.close()
+            raise
+
+    def readiness(self) -> dict:
         self.driver.verify_connectivity()
+        return {"mode": "neo4j", "accounts_available": True}
 
     def close(self) -> None:
         self.driver.close()

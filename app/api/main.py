@@ -21,6 +21,8 @@ from app.api import security
 from app.api.deps_health import DepsHealth
 from app.api.ratelimit import RateLimiter, RateLimitExceeded, connect_redis
 from app.config import Settings, get_settings
+from app.db.graph import UNAVAILABLE, AccountStoreUnavailable, GraphStore
+from app.db.snapshot import SNAPSHOT_PATH, SnapshotGraph
 from app.graph.trip_graph import PlanningUnavailable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -91,16 +93,27 @@ class FeedbackRequest(BaseModel):
     comment: str | None = Field(default=None, max_length=1000)
 
 
+def open_graph(settings: Settings) -> GraphStore | SnapshotGraph:
+    try:
+        return GraphStore(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password,
+                          settings.neo4j_database)
+    except UNAVAILABLE as error:
+        if not SNAPSHOT_PATH.exists():
+            raise
+        log.warning("Using bundled travel data because Neo4j is unavailable (%s)",
+                    type(error).__name__)
+        return SnapshotGraph(SNAPSHOT_PATH)
+
+
 # --- lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Heavy services are only built here if the app was not pre-wired (tests pre-wire).
     if not hasattr(app.state, "store"):
-        from app.db.graph import GraphStore
         from app.rag.factory import build_self_rag, build_trip_planner
 
         s: Settings = app.state.settings
-        app.state.store = GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database)
+        app.state.store = open_graph(s)
         redis_client = connect_redis(s.redis_host, s.redis_port)
         app.state.limiter = RateLimiter(redis_client, s.rate_limit_per_minute)
         if s.rag_mode == "hybrid":
@@ -157,6 +170,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(PlanningUnavailable)
     async def planning_unavailable(request: Request, exc: PlanningUnavailable):
         return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+    @app.exception_handler(AccountStoreUnavailable)
+    async def accounts_unavailable(request: Request, exc: AccountStoreUnavailable):
+        return JSONResponse(status_code=503, content={
+            "detail": "Account sign-in is temporarily unavailable. You can still plan as a guest."
+        })
 
     # --- dependencies ---
     async def current_user(request: Request, token: str = Depends(oauth2_scheme)) -> dict:
