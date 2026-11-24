@@ -43,6 +43,7 @@ from app.graph.trace import Tracer
 from app.memory import TravelMemory, extract_preferences, trip_episode
 from app.rag.retriever import RetrievalError
 from app.towns import CIRCUITS, DESTINATIONS, NOT_READY, PLACE_ALIASES  # noqa: F401
+from app.trips.ranking import rank_routes, transfer_estimate
 from app.usage import Meter, in_context, metered
 from ingest.schema import is_generic_name
 from mcp_server.client import LocalTools, ToolError
@@ -206,6 +207,7 @@ class TripState(TypedDict, total=False):
     missing: list[str]
     asks: int
     options: list[dict]
+    personalized_routes: bool
     destinations: list[str]
     candidates: dict
     entities: dict
@@ -422,27 +424,28 @@ class TripPlanner:
             if seen and not set(seen) & set(req.get("places") or []):
                 score -= len(seen)  # gently prefer somewhere new, unless they asked for it
             scored.append({"id": "+".join(combo), "label": label, "destinations": combo,
-                           "reasons": reasons, "score": score,
+                           "reasons": reasons, "score": score, "transfers": transfer_estimate(combo),
                            "visited": [DESTINATIONS[d]["name"] for d in seen]})
         # Towns the traveller named come first: most named towns covered, then fewest towns
-        # they did not ask for, then season and interest fit.
-        wanted = [d for d in req.get("places") or [] if d not in NOT_READY]
-        scored.sort(key=lambda o: (-len(set(o["destinations"]) & set(wanted)),
-                                   len(set(o["destinations"]) - set(wanted)) if wanted else 0,
-                                   -o["score"]))
+        # they did not ask for. Feedback can change the order among comparable routes.
+        wanted = set(named)
+        baseline = rank_routes(scored, wanted, {})[:3]
+        weights = (state.get("profile") or {}).get("ranking_weights") or {}
+        options = rank_routes(scored, wanted, weights)[:3] if weights else baseline
         msg = "Which circuit would you like?"
         unavailable = [DESTINATIONS[d]["name"] for d in req.get("places") or [] if d in NOT_READY]
         if unavailable:
             msg = (f"{' and '.join(unavailable)} can't be planned yet (not enough verified data). "
                    + msg)
-        return {"request": req, "options": scored[:3],
+        return {"request": req, "options": options, "personalized_routes": options != baseline,
                 "choose_msg": self._loc({"request": req}, msg)}
 
     def _choose(self, state: TripState) -> TripState:
         picked = interrupt({"type": "choose",
                             "message": state.get("choose_msg") or "Which circuit would you like?",
+                            "personalized_routes": state.get("personalized_routes", False),
                             "options": [{k: o.get(k) for k in ("id", "label", "reasons",
-                                                               "visited")}
+                                                               "visited", "transfers")}
                                         for o in state["options"]]})
         match = next((o for o in state["options"] if o["id"] == picked), state["options"][0])
         return {"destinations": match["destinations"]}

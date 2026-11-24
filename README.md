@@ -38,7 +38,8 @@ Open the [live demo](https://travelbuddy-5md.pages.dev/) or the [local app](http
 2. **Review the itinerary.** Open the agent trace, timeline, and map. Check the budget breakdown, transfer estimates, and advisory notes. Ask for a change or approve the plan.
 3. **Choose a stay.** When alternatives are available, compare hotels by town. With Google Places configured, cards show ratings and attributed review excerpts. Your hotel selection updates the cost estimate.
 4. **Save and use the plan.** Open **My trips**, tick booking tasks, and export a PDF, text summary, or `.ics` calendar. Booking links take you to the relevant external sites.
-5. **Replan from a future day.** Pick a day and describe what changed. The itinerary and hotel selection keep completed days fixed.
+5. **Teach the planner what matters to you.** In **Improve your next trip**, choose shorter road transfers or lower estimated bus fare and save your feedback. Start a new trip with the same account or guest session. The Choose screen indicates when feedback changed the circuit order. Reopen the saved trip to change or remove that vote.
+6. **Replan from a future day.** Pick a day and describe what changed. The itinerary and hotel selection keep completed days fixed.
 
 The **Ask** tab runs a separate Q&A workflow. Try “Where can I do yoga in Rishikesh?” and open a source link to inspect its listing.
 
@@ -51,6 +52,7 @@ The **Ask** tab runs a separate Q&A workflow. Try “Where can I do yoga in Rish
 | Routing, weather, and cost | Inter-town routing uses curated routes or a calibrated OSRM matrix. Dated trips can get forecasts or a labelled historical guide. Costs use ranges marked with their source or assumption. |
 | Hotel concierge | LangGraph fans out research by town and gathers optional Tavily travel notes. A code score combines available ratings, review counts, tier, price, and review analysis. The verifier checks that each displayed pro or con cites an excerpt from its attributed review. |
 | Traveller memory | LangGraph keeps the state of an in-progress trip. Approved trips can update preferences and past-trip memories, which travellers can view and delete. |
+| Feedback-driven circuit ranking | Each saved trip can contribute one vote. The planner turns votes into personal ranking weights and applies them to estimated road time and per-person bus fare between towns. |
 | Exports and offline access | The itinerary can be exported as text, PDF, or calendar events. The production PWA can reopen trips cached in the current session’s account context. |
 
 ## Architecture
@@ -77,6 +79,12 @@ flowchart LR
 - **Q&A.** The workflow retrieves and grades candidates, rewrites an unproductive query once, enriches the context with the graph, then drafts and checks the response. An unverified draft gets one retry before the workflow abstains. Source links come from the retrieved records.
 - **Tooling.** A reusable MCP server exposes budget, season, altitude, weather, transport, conditions, review, and web-search tools. The application can use it in-process or via stdio. [MCP setup](mcp_server/README.md)
 
+### How the planner learns from feedback
+
+Each priority's weight is its vote count divided by the total vote count plus one. A traveller with one vote for shorter transfers has a time weight of 0.5. The advisor compares the midpoints of each route's estimate ranges and awards a bounded bonus to routes that better fit those weights. Without feedback, the advisor uses its baseline order.
+
+Requested towns keep priority, and options with season cautions or missing transfer estimates keep their baseline positions. Estimates cover the legs between towns in a circuit. The itinerary still goes through the deterministic Critic. The learning happens in the ranker and leaves the language model weights fixed.
+
 ## Evaluation
 
 The figures below come from the dated benchmark reports in the repository. The Q&A suite has **104 questions**, including 79 answerable and 25 unanswerable questions in English, Hindi, and Hinglish. [Full Q&A report and confidence intervals](eval/RESULTS.md)
@@ -91,6 +99,7 @@ The figures below come from the dated benchmark reports in the repository. The Q
 - **Time and cost.** Median time to itinerary review was **17 seconds**, and median estimated LLM fees were **₹0.01**. These measurements cover the planner up to review. Optional hotel research and external provider charges have separate costs. [Plan report](eval/PLANS.md)
 - **Judge reliability.** A checklist jury uses three model families, repeated votes, and cached verdicts. On 30 answers judged five times, headline verdicts changed on 0–3% of answers. The report describes where the rubric was less stable. [Judge reliability](eval/RELIABILITY.md)
 - **Concierge and safeguards.** In the recorded hotel benchmark, 92% of proposed claims passed the quote check. The recorded adversarial suite reports its outcomes separately. [Hotel research](eval/CONCIERGE.md) · [Adversarial evaluation](eval/REDTEAM.md)
+- **Circuit personalization.** In two controlled API regressions, feedback on a saved Haridwar–Rishikesh trip changes the order of new routes around Mussoorie and Almora using the bundled road data. The tests check that another traveller gets the baseline order and that removing feedback restores it. [Ranking tests](tests/test_api.py)
 
 GitHub Actions runs Python tests with PostgreSQL, frontend builds, a Docker build, and live evaluation gates when the required provider secrets are available. [Evaluation commands](eval/README.md) · [CI workflow](.github/workflows/ci.yml)
 

@@ -22,6 +22,8 @@ SCHEMA = [
       trip_id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS trips_owner ON trips(owner, updated_at)",
+    """CREATE TABLE IF NOT EXISTS ranking_feedback (
+      trip_id TEXT PRIMARY KEY REFERENCES trips(trip_id), priority TEXT NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS checks (
       trip_id TEXT NOT NULL, item_id TEXT NOT NULL, done INTEGER NOT NULL,
       PRIMARY KEY (trip_id, item_id))""",
@@ -169,17 +171,18 @@ class TripStore:
 
     def get_trip(self, trip_id: str) -> dict | None:
         rows = self._db.query(
-            "SELECT owner, title, created_at, data FROM trips WHERE trip_id=?", (trip_id,))
+            "SELECT owner, title, created_at, data, priority FROM trips "
+            "LEFT JOIN ranking_feedback USING (trip_id) WHERE trip_id=?", (trip_id,))
         if not rows:
             return None
-        owner, title, created_at, data = rows[0]
+        owner, title, created_at, data, priority = rows[0]
         done = {r[0] for r in self._db.query(
             "SELECT item_id FROM checks WHERE trip_id=? AND done=1", (trip_id,))}
         trip = json.loads(data)
         for item in trip.get("checklist", []):
             item["done"] = item["id"] in done
         return {"trip_id": trip_id, "owner": owner, "title": title, "created_at": created_at,
-                **trip}
+                **trip, "ranking_feedback": priority}
 
     def list_trips(self, owner: str) -> list[dict]:
         rows = self._db.query(
@@ -187,6 +190,24 @@ class TripStore:
             "ORDER BY updated_at DESC LIMIT 50", (owner,))
         return [{"trip_id": r[0], "title": r[1], "created_at": r[2], "updated_at": r[3]}
                 for r in rows]
+
+    def set_ranking_feedback(self, trip_id: str, priority: str | None) -> None:
+        """One editable vote per saved trip. A retried request counts once."""
+        if priority is None:
+            self._db.run(("DELETE FROM ranking_feedback WHERE trip_id=?", (trip_id,)))
+        else:
+            self._db.run((
+                "INSERT INTO ranking_feedback (trip_id, priority) VALUES (?, ?) "
+                "ON CONFLICT (trip_id) DO UPDATE SET priority = excluded.priority",
+                (trip_id, priority)))
+
+    def ranking_weights(self, owner: str) -> dict[str, float]:
+        votes = self._db.query(
+            "SELECT priority, COUNT(*) FROM trips JOIN ranking_feedback USING (trip_id) "
+            "WHERE trips.owner=? GROUP BY priority", (owner,))
+        # One empty prior vote dampens the impact of a traveller's first choice.
+        total = 1 + sum(count for _, count in votes)
+        return {priority: count / total for priority, count in votes}
 
     # ---- usage (cost and latency) ----
     def record_usage(self, trip_id: str, step: str, u: dict) -> None:

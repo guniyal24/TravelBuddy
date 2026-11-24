@@ -130,6 +130,11 @@ export async function getTrip(id) {
 export async function setCheck(id, itemId, done) {
   await request(`/api/trips/${id}/checklist`, { method: "PUT", json: { item_id: itemId, done } });
 }
+export async function saveRankingFeedback(id, priority) {
+  return (await request(`/api/trips/${id}/ranking-feedback`, {
+    method: "PUT", json: { priority },
+  })).json();
+}
 export const replanTrip = (id, fromDay, reason, onEvent) =>
   tripCall(`/api/trips/${id}/replan`, { from_day: fromDay, reason }, onEvent);
 // format: txt | pdf | ics (ics needs start = YYYY-MM-DD)

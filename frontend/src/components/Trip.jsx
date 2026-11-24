@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { cacheTrip, replanTrip, resumeTrip, startTrip } from "../api.js";
+import { cacheTrip, replanTrip, resumeTrip, saveRankingFeedback, startTrip } from "../api.js";
 import { DESTINATIONS, MONTHS } from "../data.js";
 import AgentTrace, { mergeEvents } from "./AgentTrace.jsx";
 import { HotelPicker } from "./Hotels.jsx";
@@ -24,6 +24,65 @@ const WHAT_YOU_GET = [
   ["shield", "Safety notes", "Altitude, health and permits."],
   ["map", "Map and timeline", "See your route and daily rhythm."],
 ];
+
+const inr = new Intl.NumberFormat("en-IN");
+const range = ([lo, hi], format = String) =>
+  lo === hi ? format(lo) : `${format(lo)}–${format(hi)}`;
+
+function TransferEstimate({ estimate }) {
+  if (!estimate) return <span className="muted small">Between-town estimates unavailable</span>;
+  if (estimate.hours[1] === 0) return <span className="muted small">No transfers between towns</span>;
+  return (
+    <span className="muted small">
+      Between towns · about {range(estimate.hours)} hr by road · est. ₹{range(estimate.bus_per_person_inr, (n) => inr.format(n))} per person by bus
+    </span>
+  );
+}
+
+function RankingFeedback({ trip, onExpired, onSaved }) {
+  const saved = trip.ranking_feedback ?? "";
+  const [priority, setPriority] = useState(saved);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
+  async function submit(e) {
+    e.preventDefault();
+    setStatus("saving"); setError("");
+    try {
+      const { ranking_feedback } = await saveRankingFeedback(trip.trip_id, priority || null);
+      onSaved({ ...trip, ranking_feedback });
+      setStatus(priority ? "saved" : "removed");
+    } catch (e) {
+      setStatus("");
+      if (e.message === "SESSION_EXPIRED") return onExpired();
+      setError(e.message);
+    }
+  }
+
+  return (
+    <form className="replan" onSubmit={submit}>
+      <h3>Improve your next trip</h3>
+      <p className="muted small">Your feedback changes how TravelBuddy ranks future circuits for you.</p>
+      <div className="replan-row">
+        <label>What should we prioritize between towns?
+          <select value={priority} disabled={status === "saving"} onChange={(e) => {
+            setPriority(e.target.value); setStatus(""); setError("");
+          }}>
+            <option value="">No feedback</option>
+            <option value="shorter_transfers">Shorter road transfers</option>
+            <option value="lower_transfer_cost">Lower estimated bus fare</option>
+          </select>
+        </label>
+        <button className="primary" disabled={priority === saved || status === "saving"}>
+          {status === "saving" ? "Saving…" : "Save feedback"}
+        </button>
+      </div>
+      {status === "saved" && <p className="muted small" role="status">Saved for future trips.</p>}
+      {status === "removed" && <p className="muted small" role="status">Feedback removed.</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+    </form>
+  );
+}
 
 export default function Trip({ onExpired, initialTrip }) {
   const [text, setText] = useState("");
@@ -76,6 +135,11 @@ export default function Trip({ onExpired, initialTrip }) {
   const reset = () => {
     setText(""); setTripId(null); setPrompt(null); setItinerary(null); setTrip(null);
     setReason(""); setFromDay(1); setStatus("idle"); setError(""); setTrace([]);
+  };
+  const updateTripFeedback = (updated) => {
+    cacheTrip(updated);
+    setTrip((current) => current?.trip_id === updated.trip_id
+      ? { ...current, ranking_feedback: updated.ranking_feedback } : current);
   };
   const agents = new Set(trace.map((s) => s.agent).filter((a) => a !== "You")).size;
   const how = trace.length > 0 && (
@@ -177,12 +241,14 @@ export default function Trip({ onExpired, initialTrip }) {
         <div className="card">
           <h2>{prompt.message}</h2>
           {how}
+          {prompt.personalized_routes && <p className="muted small">Order adjusted using your trip feedback.</p>}
           <div className="options">
             {prompt.options.map((o) => (
               <button key={o.id} className="option" onClick={() => reply(o.id)}>
                 <span className="option-icon"><Icon name="route" size={20} /></span>
                 <span className="option-body">
                   <strong>{o.label}</strong>
+                  {o.transfers !== undefined && <TransferEstimate estimate={o.transfers} />}
                   {o.visited?.length > 0 && <span className="pill"><Icon name="clock" size={13} /> You visited {o.visited.join(" and ")} before</span>}
                   {o.reasons.length > 0
                     ? <span className="pill warn"><Icon name="alert" size={13} /> Heads-up: {o.reasons.join("; ")}</span>
@@ -227,6 +293,8 @@ export default function Trip({ onExpired, initialTrip }) {
         <div className="card flush">
           {trace.length > 0 && <div className="card-pad">{how}</div>}
           <TripView markdown={itinerary} timeline={trip?.timeline} trip={trip} onExpired={onExpired} />
+          {trip && <RankingFeedback key={trip.trip_id} trip={trip} onExpired={onExpired}
+                                    onSaved={updateTripFeedback} />}
           {trip && (
             <form className="replan" onSubmit={(e) => {
               e.preventDefault();

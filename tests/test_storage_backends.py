@@ -40,6 +40,28 @@ def test_profiles_round_trip_and_upsert(store):
     assert store.get_profile(email) == {"tier": "premium", "diet": "veg"}
 
 
+def test_ranking_feedback_can_be_retried_changed_and_removed(store):
+    owner, other = f"{uuid.uuid4()}@x.com", f"{uuid.uuid4()}@x.com"
+    first, second = str(uuid.uuid4()), str(uuid.uuid4())
+    store.save_trip(first, owner, _trip())
+    store.save_trip(second, owner, _trip())
+    assert store.ranking_weights(owner) == {}
+    store.set_ranking_feedback(first, "shorter_transfers")
+    store.set_ranking_feedback(first, "shorter_transfers")
+    assert store.ranking_weights(owner) == {"shorter_transfers": .5}
+    store.set_ranking_feedback(second, "lower_transfer_cost")
+    assert store.ranking_weights(owner) == {"shorter_transfers": 1 / 3, "lower_transfer_cost": 1 / 3}
+    assert store.ranking_weights(other) == {}
+    store.set_ranking_feedback(first, "lower_transfer_cost")
+    assert store.ranking_weights(owner) == {"lower_transfer_cost": 2 / 3}
+    store.save_trip(first, owner, _trip())
+    assert store.get_trip(first)["ranking_feedback"] == "lower_transfer_cost"
+    store.set_ranking_feedback(first, None)
+    store.set_ranking_feedback(first, None)
+    assert store.get_trip(first)["ranking_feedback"] is None
+    assert store.ranking_weights(owner) == {"lower_transfer_cost": .5}
+
+
 def test_trips_keep_created_at_and_checklist_ticks(store):
     trip_id, owner = str(uuid.uuid4()), f"{uuid.uuid4()}@x.com"
     store.save_trip(trip_id, owner, _trip())

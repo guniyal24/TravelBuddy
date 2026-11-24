@@ -24,6 +24,7 @@ from app.config import Settings, get_settings
 from app.db.graph import UNAVAILABLE, AccountStoreUnavailable, GraphStore
 from app.db.snapshot import SNAPSHOT_PATH, SnapshotGraph
 from app.graph.trip_graph import PlanningUnavailable
+from app.trips.ranking import RankingPriority
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger(__name__)
@@ -84,6 +85,10 @@ class TripReplan(BaseModel):
 class ChecklistUpdate(BaseModel):
     item_id: str = Field(max_length=64)
     done: bool
+
+
+class RankingFeedbackUpdate(BaseModel):
+    priority: RankingPriority | None
 
 
 class FeedbackRequest(BaseModel):
@@ -388,7 +393,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def start_trip(body: TripStart, request: Request, stream: bool = False,
                          user: dict = Depends(rate_limited_user)):
         trip_id = str(uuid.uuid4())
-        profile = request.app.state.trips.get_profile(user["email"])
+        trips = request.app.state.trips
+        profile = trips.get_profile(user["email"])
+        weights = trips.ranking_weights(user["email"])
+        if weights:
+            profile = {**profile, "ranking_weights": weights}
         planner = request.app.state.planner
         if stream:
             return _event_stream(request, trip_id, user["email"], lambda on_event: planner.start(
@@ -403,6 +412,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/trips/{trip_id}")
     async def get_trip(trip_id: str, request: Request, user: dict = Depends(current_user)):
         return _saved_trip(request, trip_id, user)
+
+    @app.put("/api/trips/{trip_id}/ranking-feedback")
+    async def update_ranking_feedback(trip_id: str, body: RankingFeedbackUpdate, request: Request,
+                                      user: dict = Depends(current_user)):
+        _saved_trip(request, trip_id, user)
+        request.app.state.trips.set_ranking_feedback(trip_id, body.priority)
+        return {"ranking_feedback": body.priority}
 
     @app.post("/api/trips/{trip_id}/resume")
     async def resume_trip(trip_id: str, body: TripResume, request: Request, stream: bool = False,

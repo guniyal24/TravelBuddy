@@ -1,3 +1,8 @@
+import pytest
+from test_guest_and_stream_api import guest_headers, sse
+from test_trip_graph import make
+
+
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
 
@@ -85,6 +90,45 @@ def test_new_trip_receives_the_saved_profile(client, auth_headers):
     client.put("/api/profile", json={"tier": "premium"}, headers=auth_headers)
     client.post("/api/trips", json={"text": "x"}, headers=auth_headers)
     assert client.app.state.planner.calls[0][0] == "start"
+
+
+@pytest.mark.parametrize(
+    "town, days, month, priority, baseline, preferred",
+    [
+        ("Mussoorie", 2, 4, "shorter_transfers", "Dehradun + Mussoorie", "Mussoorie + Dhanaulti"),
+        ("Almora", 3, 3, "lower_transfer_cost", "Nainital + Almora", "Almora + Binsar"),
+    ],
+)
+def test_saved_trip_feedback_reranks_a_new_circuit_for_the_owner(
+        client, auth_headers, town, days, month, priority, baseline, preferred):
+    _saved_trip(client)  # Haridwar and Rishikesh, independent of the next trip's circuits
+    intake = {"days": days, "month": month, "people": 2, "origin": "Pune"}
+    client.app.state.planner, _ = make([intake] * 4)
+    endpoint = "/api/trips/T1/ranking-feedback"
+    other = guest_headers(client)
+    assert client.put(endpoint, json={"priority": priority}).status_code == 401
+    assert client.put(endpoint, json={"priority": priority}, headers=other).status_code == 403
+    assert client.put(endpoint, json={"priority": "unknown"}, headers=auth_headers).status_code == 422
+
+    request = {"text": f"{days} days in {town} for two people"}
+    cold = client.post("/api/trips", json=request, headers=auth_headers).json()["prompt"]
+    assert cold["options"][1]["label"] == baseline
+    assert cold["personalized_routes"] is False
+
+    saved = client.put(endpoint, json={"priority": priority}, headers=auth_headers)
+    assert saved.json() == {"ranking_feedback": priority}
+    assert client.get("/api/trips/T1", headers=auth_headers).json()["ranking_feedback"] == priority
+
+    result = client.post("/api/trips?stream=true", json=request, headers=auth_headers)
+    tailored = sse(result.text)[-1]["prompt"]
+    assert tailored["options"][0] == cold["options"][0]  # requested town alone still comes first
+    assert tailored["options"][1]["label"] == preferred
+    assert tailored["personalized_routes"] is True
+    guest = client.post("/api/trips", json=request, headers=other).json()["prompt"]
+    assert guest == cold
+
+    assert client.put(endpoint, json={"priority": None}, headers=auth_headers).status_code == 200
+    assert client.post("/api/trips", json=request, headers=auth_headers).json()["prompt"] == cold
 
 
 def test_trip_list_get_checklist_and_ownership(client, auth_headers):
