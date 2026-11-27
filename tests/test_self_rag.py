@@ -188,7 +188,7 @@ def test_stream_steps_yields_nodes_in_order():
         completions=["ok"], retrievals=[[doc("a")]],
     )
     nodes = [name for name, _ in rag.stream_steps("q")]
-    assert nodes == ["retrieve", "grade", "expand", "generate", "check"]
+    assert nodes == ["retrieve", "grade", "expand", "generate", "check", "guard"]
 
 
 def test_format_entity_includes_price_tier_and_falls_back_to_doc_text():

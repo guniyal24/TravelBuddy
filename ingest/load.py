@@ -2,6 +2,7 @@
 
     python -m ingest.load neo4j      [--dry-run] [--wipe] [--only destination_almora ...]
     python -m ingest.load pinecone   [--dry-run]          [--only destination_almora ...]
+    python -m ingest.load towns      [--dry-run]   (town profiles, own Pinecone namespace)
 
 `--only` loads just those towns (after `ingest.build --only ... --merge`) and removes their
 places that are no longer in entities.json from the store.
@@ -83,7 +84,9 @@ def place_prefixes(towns: list[str]) -> list[str]:
 
 def pinecone_record(e: dict) -> dict:
     """Metadata only; the hybrid retriever reads name/type/city/semantic_text."""
-    dest = (e.get("destination_id") or "").removeprefix("destination_").replace("_", " ").title()
+    from app.towns import search_city
+
+    dest = search_city(e.get("destination_id") or "")
     meta = {
         "name": e["name"], "type": e["type"],
         "city": e["name"] if e["type"] == "Destination" else dest,
@@ -143,7 +146,8 @@ def load_neo4j(entities: list[dict], wipe: bool = False, known: set[str] | None 
 
 
 # ---------- Pinecone ----------
-def load_pinecone(entities: list[dict], towns: list[str] | None = None) -> dict:
+def _pinecone():
+    """(index, embedding client, model, dim), creating the index on first use."""
     from openai import OpenAI
     from pinecone import Pinecone
 
@@ -154,13 +158,16 @@ def load_pinecone(entities: list[dict], towns: list[str] | None = None) -> dict:
     if name not in pc.list_indexes().names():
         pc.create_index(name=name, dimension=dim, metric="cosine",
                         spec={"serverless": {"cloud": "aws", "region": "us-east-1"}})
-    index = pc.Index(name)
     client = OpenAI(
         api_key=os.getenv("DEEPINFRA_API_KEY") or os.environ["OPENAI_API_KEY"],
         base_url=os.getenv("EMBED_BASE_URL", "https://api.deepinfra.com/v1/openai"),
     )
+    return pc.Index(name), client, model, dim
 
-    records = [pinecone_record(e) for e in entities]
+
+def _upsert(index, client, model: str, dim: int, records: list[dict],
+            namespace: str | None = None) -> None:
+    kwargs = {"namespace": namespace} if namespace else {}
     for chunk in _chunks(records, BATCH):
         resp = client.embeddings.create(
             model=model, input=[r["text"] for r in chunk], encoding_format="float")
@@ -169,7 +176,29 @@ def load_pinecone(entities: list[dict], towns: list[str] | None = None) -> dict:
                 f"Embedding size {len(resp.data[0].embedding)} != PINECONE_VECTOR_DIM {dim}")
         index.upsert(vectors=[
             {"id": r["id"], "values": d.embedding, "metadata": r["metadata"]}
-            for r, d in zip(chunk, resp.data, strict=True)])
+            for r, d in zip(chunk, resp.data, strict=True)], **kwargs)
+
+
+def load_town_profiles(profiles: list[dict]) -> dict:
+    """Upsert town profiles into their own namespace and drop towns no longer offered."""
+    from ingest.town_profiles import TOWN_NAMESPACE, pinecone_town_record
+
+    index, client, model, dim = _pinecone()
+    records = [pinecone_town_record(p) for p in profiles]
+    _upsert(index, client, model, dim, records, TOWN_NAMESPACE)
+    keep = {r["id"] for r in records}
+    stale = [i for page in index.list(namespace=TOWN_NAMESPACE)
+             for i in (getattr(x, "id", x) for x in page) if i not in keep]
+    if stale:
+        index.delete(ids=stale, namespace=TOWN_NAMESPACE)
+    return {"towns_upserted": len(records), "removed": stale, "namespace": TOWN_NAMESPACE}
+
+
+def load_pinecone(entities: list[dict], towns: list[str] | None = None) -> dict:
+    index, client, model, dim = _pinecone()
+    name = os.environ["PINECONE_INDEX_NAME"]
+    records = [pinecone_record(e) for e in entities]
+    _upsert(index, client, model, dim, records)
     stale: list[str] = []
     if towns:  # places dropped from these towns since the last load
         keep = {r["id"] for r in records}
@@ -186,7 +215,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     load_dotenv()
     ap = argparse.ArgumentParser()
-    ap.add_argument("target", choices=["neo4j", "pinecone"])
+    ap.add_argument("target", choices=["neo4j", "pinecone", "towns"])
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--wipe", action="store_true", help="neo4j: delete existing :Entity nodes first")
     ap.add_argument("--only", nargs="*", help="destination ids: load just these towns")
@@ -195,6 +224,16 @@ def main() -> None:
         ap.error("--wipe would delete every other town; use it only for a full load")
 
     everything = load_entities()
+    if args.target == "towns":
+        from app.towns import towns as registry
+        from ingest.town_profiles import build_profiles
+
+        profiles = build_profiles(everything, registry())
+        if args.dry_run:
+            print(f"{len(profiles)} town profiles")
+            return
+        print(load_town_profiles(profiles))
+        return
     known = {e["id"] for e in everything}
     entities = select_towns(everything, args.only) if args.only else everything
     if args.only and not entities:

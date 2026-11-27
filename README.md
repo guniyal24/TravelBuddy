@@ -74,7 +74,7 @@ flowchart LR
     Q --> V[Grade evidence and verify answer]
 ```
 
-- **Planner.** Intake collects trip dates, party size, interests, and constraints. The advisor suggests a circuit. Research retrieves candidates from Pinecone and looks up full Neo4j records. Stay, food, and transport specialists prepare the candidates before the LLM drafts an itinerary. The planner runs the Critic, season and altitude checks, weather lookup, and range-based pricing before asking for approval.
+- **Planner.** Intake collects trip dates, party size, interests, and constraints. The advisor searches short town profiles in Pinecone (their own namespace), an LLM proposes circuits from those profiles and road times, and code rejects circuits that need more days or longer drives than the trip allows; the curated circuit list is the fallback. Research retrieves places from Pinecone only for the chosen towns, grades them against the traveller's interests, and then looks up full Neo4j records. Stay, food, and transport specialists prepare the candidates before the LLM drafts an itinerary. The planner runs the Critic, season and altitude checks, weather lookup, and range-based pricing before asking for approval.
 - **Human approval and live progress.** LangGraph interrupts pause the workflow for missing details, circuit choice, itinerary approval, and hotel selection. FastAPI streams step updates using Server-Sent Events. PostgreSQL or SQLite stores the checkpoint and approved trip.
 - **Q&A.** The workflow retrieves and grades candidates, rewrites an unproductive query once, enriches the context with the graph, then drafts and checks the response. An unverified draft gets one retry before the workflow abstains. Source links come from the retrieved records.
 - **Tooling.** A reusable MCP server exposes budget, season, altitude, weather, transport, conditions, review, and web-search tools. The application can use it in-process or via stdio. [MCP setup](mcp_server/README.md)
@@ -87,18 +87,19 @@ Requested towns keep priority, and options with season cautions or missing trans
 
 ## Evaluation
 
-The figures below come from the dated benchmark reports in the repository. The Q&A suite has **104 questions**, including 79 answerable and 25 unanswerable questions in English, Hindi, and Hinglish. [Full Q&A report and confidence intervals](eval/RESULTS.md)
+The figures below come from the dated benchmark reports in the repository. The Q&A suite (last run 2026-11-27/28) has **104 questions**, including 79 answerable and 25 unanswerable questions in English, Hindi, and Hinglish. [Full Q&A report and confidence intervals](eval/RESULTS.md)
 
 | System | Retrieval hit rate | Answers naming places outside the data | Answers answerable questions | Declines unanswerable questions |
 |---|---:|---:|---:|---:|
-| LLM only | — | 73% | 100% | 16% |
-| Plain RAG | 87% | 0% | 59% | 100% |
-| Self-RAG | 96% | 1% | 97% | 100% |
+| LLM only | — | 73% | 100% | 8% |
+| Plain RAG | 86% | 3% | 66% | 100% |
+| Self-RAG | 95% | 1% | 99% | 100% |
 
-- **Planner validation.** All 30 scenarios reached review and passed the applicable plan checks. The first draft passed the Critic in 90% of scenarios. Disabling the Critic let two errors through, an unknown place and a meal in the wrong town. [Plan report](eval/PLANS.md) · [Ablations](eval/ABLATIONS.md)
-- **Time and cost.** Median time to itinerary review was **17 seconds**, and median estimated LLM fees were **₹0.01**. These measurements cover the planner up to review. Optional hotel research and external provider charges have separate costs. [Plan report](eval/PLANS.md)
-- **Judge reliability.** A checklist jury uses three model families, repeated votes, and cached verdicts. On 30 answers judged five times, headline verdicts changed on 0–3% of answers. The report describes where the rubric was less stable. [Judge reliability](eval/RELIABILITY.md)
-- **Concierge and safeguards.** In the recorded hotel benchmark, 92% of proposed claims passed the quote check. The recorded adversarial suite reports its outcomes separately. [Hotel research](eval/CONCIERGE.md) · [Adversarial evaluation](eval/REDTEAM.md)
+- **Planner validation.** All 30 scenarios reached review and passed the applicable plan checks (2026-11-27). The first draft passed the Critic in 93% of scenarios. Disabling the Critic let two errors through, an unknown place and a meal in the wrong town. [Plan report](eval/PLANS.md) · [Ablations](eval/ABLATIONS.md)
+- **Circuit discovery.** On 15 open requests that name no town, the first circuit offered included a hand-labelled fitting town in 15 of 15, for both the town-search flow and the curated rule list; town search costs about twice the LLM calls. [Discovery report](eval/DISCOVERY.md)
+- **Time and cost.** Median time to itinerary review was **19 seconds** (4 LLM calls), and median estimated LLM fees were **₹0.02**. These measurements cover the planner up to review. Optional hotel research and external provider charges have separate costs. [Plan report](eval/PLANS.md)
+- **Judge reliability.** A checklist jury uses three model families, repeated votes, and cached verdicts. On 30 answers judged five times by five judge designs (one free-form call up to the three-model jury), the jury's headline verdicts changed on 0–3% of answers against up to 7% for a single free-form call, and two judges left 5% of item verdicts tied. The judges agree on concrete and declines (Fleiss' kappa 1.00) but not on on_topic (0.21), which is where verdicts still flip. [Judge reliability](eval/RELIABILITY.md)
+- **Concierge and safeguards.** In the recorded hotel benchmark, 92% of proposed claims passed the quote check. In three consecutive runs of the 13-attack adversarial suite (2026-11-28), all 13 attacks were defended each time; code guards withhold answers that repeat a system prompt and strip text that poses as source data. [Hotel research](eval/CONCIERGE.md) · [Adversarial evaluation](eval/REDTEAM.md)
 - **Circuit personalization.** In two controlled API regressions, feedback on a saved Haridwar–Rishikesh trip changes the order of new routes around Mussoorie and Almora using the bundled road data. The tests check that another traveller gets the baseline order and that removing feedback restores it. [Ranking tests](tests/test_api.py)
 
 GitHub Actions runs Python tests with PostgreSQL, frontend builds, a Docker build, and live evaluation gates when the required provider secrets are available. [Evaluation commands](eval/README.md) · [CI workflow](.github/workflows/ci.yml)

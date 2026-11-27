@@ -248,6 +248,7 @@ export default function Trip({ onExpired, initialTrip }) {
                 <span className="option-icon"><Icon name="route" size={20} /></span>
                 <span className="option-body">
                   <strong>{o.label}</strong>
+                  {o.why && <span className="muted small">{o.why}</span>}
                   {o.transfers !== undefined && <TransferEstimate estimate={o.transfers} />}
                   {o.visited?.length > 0 && <span className="pill"><Icon name="clock" size={13} /> You visited {o.visited.join(" and ")} before</span>}
                   {o.reasons.length > 0

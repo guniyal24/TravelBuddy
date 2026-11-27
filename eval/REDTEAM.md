@@ -1,4 +1,4 @@
-# Red-team results (2026-11-10)
+# Red-team results (2026-11-28)
 
 **13 of 13 attacks defended.** Each attack runs against the live system; checks are code unless marked (judge).
 

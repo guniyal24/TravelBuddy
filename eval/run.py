@@ -23,6 +23,7 @@ import json
 import logging
 import statistics
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
@@ -215,6 +216,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--systems", nargs="*", default=list(SYSTEMS))
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--workers", type=int, default=1, help="questions answered in parallel")
     ap.add_argument("--judge", choices=["v1", "v2"], default="v2")
     ap.add_argument("--no-cache", action="store_true", help="re-ask every juror")
     ap.add_argument("--rescore", action="store_true",
@@ -225,7 +227,10 @@ def main() -> None:
     if args.rescore:
         rescore(s)
         return
-    store = GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database)
+    from eval.plans import open_store
+
+    store, store_mode = open_store(s)  # Neo4j, or the bundled snapshot when it is unreachable
+    print(f"graph store: {store_mode}")
     chat, _ = build_llm_clients(s)
     ctx = {"settings": s, "store": store, "llm": LLM(chat, retries=6)}
     if "baseline" in args.systems:
@@ -257,28 +262,37 @@ def main() -> None:
 
     results, raw = {}, {}
     for name in args.systems:
-        rows = []
-        for q in questions:
-            gen_llm = ctx["self_rag"].llm if name == "self_rag" else ctx["llm"]
-            before, t0 = gen_llm.calls, time.time()
+        gen_llm = ctx["self_rag"].llm if name == "self_rag" else ctx["llm"]
+
+        def one(q, name=name, gen_llm=gen_llm):
+            # LLM calls per answer are counted on the shared client, so they are exact only
+            # with --workers 1; with more workers they are the average over the run.
+            t0 = time.time()
             try:
                 answer, ids = SYSTEMS[name](q["query"], ctx)
             except Exception as exc:  # keep going; record the failure
                 log.exception("%s failed on %s", name, q["id"])
                 answer, ids = f"[error: {exc}]", []
             latency = time.time() - t0
-            calls = gen_llm.calls - before
             j = judge(q["query"], answer)
-            rows.append({
+            row = {
                 "id": q["id"], "kind": q["kind"], "category": q["category"],
                 "lang": q.get("lang", "en"),
                 "query": q["query"], "answer": answer, "context_ids": ids,
                 "has_context": name != "no_rag",
                 "hit": bool(set(q.get("expected_any", [])) & set(ids)),
-                "judge": j, "llm_calls": calls, "latency_s": latency,
-            })
-            print(f"[{name}] {q['id']} hit={rows[-1]['hit']} declines={j['declines']} "
-                  f"ungrounded={len(j['ungrounded_places'])}")
+                "judge": j, "latency_s": latency,
+            }
+            print(f"[{name}] {q['id']} hit={row['hit']} declines={j['declines']} "
+                  f"ungrounded={len(j['ungrounded_places'])}", flush=True)
+            return row
+
+        before = gen_llm.calls
+        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+            rows = list(pool.map(one, questions))  # map keeps the golden-set order
+        per_answer = (gen_llm.calls - before) / max(1, len(rows))
+        for r in rows:
+            r["llm_calls"] = per_answer
         results[name] = summarize(rows)
         raw[name] = rows
 
@@ -287,12 +301,13 @@ def main() -> None:
     for name, rows in raw.items():  # one file per system so parallel runs do not clash
         (out_dir / f"{date.today()}-{name}.json").write_text(
             json.dumps(rows, indent=2, ensure_ascii=False))
-    # Build the report from every system's latest file, in a fixed order.
+    # Build the report from every system's latest file, in a fixed order (latest, not
+    # today's: parallel runs of different systems may finish on either side of midnight).
     merged = {}
     for name in SYSTEMS:
-        f = out_dir / f"{date.today()}-{name}.json"
-        if f.exists():
-            merged[name] = summarize(json.loads(f.read_text()))
+        files = sorted(out_dir.glob(f"????-??-??-{name}.json"))
+        if files:
+            merged[name] = summarize(json.loads(files[-1].read_text()))
     write_report(merged, ROOT / "RESULTS.md", judge_note)
     print(f"judge LLM calls: {judge_llm.calls}, tokens in/out: {judge_llm.prompt_tokens}/"
           f"{judge_llm.completion_tokens}")

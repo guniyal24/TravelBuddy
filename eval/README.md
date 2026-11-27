@@ -11,6 +11,10 @@ A third report checks the checker: **can the LLM judge be trusted?** `eval/relia
 report [`RELIABILITY.md`](RELIABILITY.md). A fourth covers the Concierge stage's hotel
 research: `eval/concierge.py`, report [`CONCIERGE.md`](CONCIERGE.md).
 
+[`DISCOVERY.md`](DISCOVERY.md) compares the two ways of finding circuits (town search + LLM,
+the default, against the curated rule-based list) on the 30 scenarios and on 15 open requests
+that name no town (`eval/discovery.yaml`, with hand-labelled towns that fit).
+
 ## 1. Answer quality
 
 104 questions: 79 the data can answer and 25 it cannot. They cover all nine offered towns
@@ -99,6 +103,8 @@ proves every check can fail.
 ```bash
 python -m eval.run --systems self_rag baseline no_rag   # answer quality -> RESULTS.md
 python -m eval.plans                                     # plan quality   -> PLANS.md
+python -m eval.plans --discovery rules                   # same, old circuit step
+python -m eval.plans --set discovery [--discovery rules] # open requests -> DISCOVERY.md
 python -m eval.reliability flip --runs 5 --limit 30      # judge stability -> RELIABILITY.md
 python -m eval.reliability label --n 80                  # label answers yourself (y/n)
 python -m eval.reliability agreement                     # judge vs your labels (kappa)

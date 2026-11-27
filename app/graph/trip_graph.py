@@ -6,8 +6,11 @@
 
 Agents / roles
   Intake   (LLM)            turns free text into a structured request, asks for what is missing
-  Advisor  (code + season)  proposes circuits for the month
-  Research (retrieval)      pulls candidate places only from the knowledge base
+  Advisor  (search + LLM)   finds towns that fit (Pinecone town profiles), an LLM proposes
+                            circuits from those short profiles, code checks them (days, road
+                            times, availability); rule-based circuits are the fallback
+  Research (retrieval)      pulls candidate places only for the chosen towns, grades them
+                            against the interests (Self-RAG style), then expands from the graph
   Planner  (LLM)            drafts the day-by-day plan, using ONLY candidate ids
   Critic   (deterministic)  rejects plans with unknown ids, missing stays, overloaded days
   Cost     (deterministic)  prices the plan with the cost engine
@@ -35,6 +38,7 @@ from app.graph.agents import (
     StayAgent,
     TransportAgent,
 )
+from app.graph.circuits import CIRCUIT_SYSTEM, check_circuit, parse_circuits, short_code
 from app.graph.concierge import HotelAgent, TravelInfoAgent
 from app.graph.critic import MAX_MEALS, fallback_plan, validate_plan
 from app.graph.render import render_itinerary
@@ -42,10 +46,18 @@ from app.graph.schedule import build_timeline
 from app.graph.trace import Tracer
 from app.memory import TravelMemory, extract_preferences, trip_episode
 from app.rag.retriever import RetrievalError
-from app.towns import CIRCUITS, DESTINATIONS, NOT_READY, PLACE_ALIASES  # noqa: F401
+from app.towns import (  # noqa: F401
+    CIRCUITS,
+    DESTINATIONS,
+    NOT_READY,
+    PLACE_ALIASES,
+    search_city,
+)
+from app.transport.routes import transport_options
 from app.trips.ranking import rank_routes, transfer_estimate
 from app.usage import Meter, in_context, metered
 from ingest.schema import is_generic_name
+from ingest.town_profiles import TOWN_NAMESPACE, load_profiles
 from mcp_server.client import LocalTools, ToolError
 from mcp_server.weather import travel_date
 
@@ -61,6 +73,11 @@ class PlanningUnavailable(Exception):
     empty or made-up plan; the message is safe to show the traveller."""
 
 MAX_ASKS = 2
+TOWN_SEARCH_K = 12  # town profiles fetched, then re-ranked with a keyword match on themes
+THEME_BONUS = 0.04  # per interest that matches a town's themes (vector scores sit ~0.35-0.55)
+DRIVE_HOURS_PER_POINT = 3.0  # LLM circuits lose a ranking point per 3 h of driving (upper bound)
+MAX_COMPANION_HOURS = 6.0  # a suggested extra town must be this close by road to a named one
+MAX_CIRCUIT_ATTEMPTS = 2  # LLM circuit proposals before falling back to the rule-based list
 MAX_PLAN_ATTEMPTS = 3
 MAX_EDITS = 3
 REQUIRED = ("days", "people", "month")
@@ -125,6 +142,24 @@ def _route_order(places: list[str]) -> list[str]:
     return route
 
 
+def days_ok(towns: list[str], days: int) -> bool:
+    return bool(towns) and days >= len(towns)
+
+
+def _rerank_towns(hits: list[dict], interests: list[str]) -> list[dict]:
+    """Hybrid ranking: vector similarity plus a small bonus for each interest that matches one
+    of the town's themes ("lake" ~ "lakes"). The vector scores of town profiles sit close
+    together, and a long guidebook summary can outweigh the themes; the keyword match keeps a
+    clearly named interest (Ganga aarti -> Haridwar) on top."""
+    words = {w for i in interests for w in re.findall(r"[a-z]+", str(i).lower()) if len(w) >= 3}
+
+    def bonus(h: dict) -> float:
+        themes = (DESTINATIONS.get(h["id"]) or {}).get("themes") or []
+        return THEME_BONUS * sum(any(w.startswith(t) or t.startswith(w) for w in words)
+                                 for t in themes)
+    return sorted(hits, key=lambda h: -(h.get("score", 0.0) + bonus(h)))
+
+
 def _says_from(text: str, place: str) -> bool:
     """True if the text names `place` as the starting point: "from X" or Hindi "X se"."""
     text = (text or "").lower()
@@ -136,7 +171,7 @@ EXTRACT_SYSTEM = (
     "Extract trip details from the traveller's message. Return JSON only with keys: "
     '"origin" (city or null), "days" (int or null), "people" (int or null), "month" (1-12 or '
     'null), "tier" ("budget"|"mid"|"premium" or null), "budget_inr" (number or null), '
-    '"interests" (list of short words), "vulnerable_travellers" (true if children, elderly or '
+    '"interests" (list of short English words, translated if the message is in Hindi), "vulnerable_travellers" (true if children, elderly or '
     'health conditions are mentioned, else false), "diet" ("veg"|"non-veg" or null), '
     '"pace" ("relaxed"|"balanced"|"packed" or null), "start_date" (the '
     'first day of travel as YYYY-MM-DD, worked out from TODAY for phrases like "next Friday" or '
@@ -178,6 +213,12 @@ def valid_start(value, today: date) -> date | None:
     except ValueError:
         return None
     return d if today <= d <= today + timedelta(days=366) else None
+
+GRADE_SYSTEM = (
+    "You check which candidate places match a traveller's interests. Return JSON only: "
+    '{"relevant":["P1","P4"]} with the codes of places that clearly fit at least one '
+    "interest. Judge only from the given text; leave out places that do not fit."
+)
 
 PLAN_SYSTEM = (
     "You are a trip planner for Uttarakhand. Build a day-by-day plan using ONLY the candidate "
@@ -244,18 +285,24 @@ class TripState(TypedDict, total=False):
     said: list  # everything the traveller typed this trip (the memory agent learns from it)
     learned: list  # preferences saved after approval
     weather: dict  # per-day weather when the traveller gave dates
+    discovery: dict  # how the circuits were found (town search + LLM, or rules) and why
+    grading: dict  # places graded against the interests before the graph lookup
 
 
 class TripPlanner:
     def __init__(self, llm, retriever, store, small_model: str, big_model: str,
                  checkpointer=None, tools=None, concierge: bool = False,
-                 memory: TravelMemory | None = None, ablate: frozenset = frozenset()):
+                 memory: TravelMemory | None = None, ablate: frozenset = frozenset(),
+                 discovery: str = "rules"):
         self.llm, self.retriever, self.store = llm, retriever, store
         self.concierge = concierge  # research hotels and travel info after approval
         self.memory = memory  # long-term memory across trips (None: off)
         # Evaluation only: switch a component off to measure what it contributes
         # ("critic": accept the LLM's first draft; "food": skip the diet filter).
         self.ablate = frozenset(ablate)
+        # "search": Pinecone town profiles + LLM circuits checked in code (the app default);
+        # "rules": score the curated circuit list in code only (fallback, and for comparison).
+        self.discovery = discovery
         self.small, self.big = small_model, big_model
         self.tools = tools or LocalTools()  # LocalTools (direct) or MCPTools (via MCP)
         self.graph = self._build(checkpointer or MemorySaver())
@@ -365,7 +412,11 @@ class TripPlanner:
         merged["diet"] = merged.get("diet") if merged.get("diet") in ("veg", "non-veg") else ""
         merged["pace"] = merged.get("pace") if merged.get("pace") in (
             "relaxed", "balanced", "packed") else ""
-        merged["vulnerable_travellers"] = bool(merged.get("vulnerable_travellers"))
+        # Once this trip mentions children, elderly travellers or a health condition, a later
+        # short reply ("3 people", read by the LLM as false) must not drop the health checks.
+        merged["vulnerable_travellers"] = (bool(merged.get("vulnerable_travellers"))
+                                           or bool((state.get("request") or {})
+                                                   .get("vulnerable_travellers")))
         missing = [k for k in REQUIRED if not merged.get(k)]
         said = [*(state.get("said") or []), state["user_text"]]
         memories = state.get("memories")
@@ -397,17 +448,27 @@ class TripPlanner:
         days, month = req["days"], req["month"]
         interests = " ".join(req.get("interests", [])).lower()
         scored = []
-        combos = [c for c, min_days in CIRCUITS
-                  if days >= min_days and not NOT_READY.intersection(c)]
-        combos += [[d] for d in DESTINATIONS if d not in NOT_READY]
-        # The traveller named a set of towns no ready-made circuit covers (e.g. Ranikhet and
-        # Almora): offer exactly those, in a sensible travel order, if there is a day for each.
         named = [d for d in req.get("places") or [] if d not in NOT_READY]
-        if (len(named) >= 2 and days >= len(named)
-                and not any(set(c) == set(named) for c in combos)):
-            combos.append(_route_order(named))
         visited = {t for m in state.get("memories") or [] if m.get("kind") == "trip"
                    for t in m.get("towns") or []}
+        why: dict[str, str] = {}
+        circuits, discovery = (self._discover(state, req, named, visited)
+                               if self.discovery == "search" else (None, {"method": "rules"}))
+        if circuits:
+            combos = [c["towns"] for c in circuits]
+            why = {"+".join(c["towns"]): c["why"] for c in circuits}
+            # Named towns are always on offer, even if the LLM left them out.
+            if named and days >= len(named) and not any(set(named) <= set(c) for c in combos):
+                combos.append(_route_order(named))
+        else:
+            combos = [c for c, min_days in CIRCUITS
+                      if days >= min_days and not NOT_READY.intersection(c)]
+            combos += [[d] for d in DESTINATIONS if d not in NOT_READY]
+            # The traveller named a set of towns no ready-made circuit covers (e.g. Ranikhet and
+            # Almora): offer exactly those, in a sensible travel order, if there is a day for each.
+            if (len(named) >= 2 and days >= len(named)
+                    and not any(set(c) == set(named) for c in combos)):
+                combos.append(_route_order(named))
         for combo in combos:
             reasons, score = [], 0
             for d in combo:
@@ -419,13 +480,19 @@ class TripPlanner:
                 score += sum(1 for t in DESTINATIONS[d]["themes"] if t in interests)
             if len(combo) > 1 and days >= 3:
                 score += 1
+            if circuits and len(combo) > 1:
+                # Theme points add up per town, which favours long circuits; LLM-proposed ones
+                # can be far apart (the curated list never is), so driving time costs points.
+                est = transfer_estimate(combo)
+                score -= round(est["hours"][1] / DRIVE_HOURS_PER_POINT) if est else 0
             label = " + ".join(DESTINATIONS[d]["name"] for d in combo)
             seen = [d for d in combo if d in visited]
             if seen and not set(seen) & set(req.get("places") or []):
                 score -= len(seen)  # gently prefer somewhere new, unless they asked for it
             scored.append({"id": "+".join(combo), "label": label, "destinations": combo,
                            "reasons": reasons, "score": score, "transfers": transfer_estimate(combo),
-                           "visited": [DESTINATIONS[d]["name"] for d in seen]})
+                           "visited": [DESTINATIONS[d]["name"] for d in seen],
+                           "why": why.get("+".join(combo), "")})
         # Towns the traveller named come first: most named towns covered, then fewest towns
         # they did not ask for. Feedback can change the order among comparable routes.
         wanted = set(named)
@@ -438,14 +505,121 @@ class TripPlanner:
             msg = (f"{' and '.join(unavailable)} can't be planned yet (not enough verified data). "
                    + msg)
         return {"request": req, "options": options, "personalized_routes": options != baseline,
-                "choose_msg": self._loc({"request": req}, msg)}
+                "choose_msg": self._loc({"request": req}, msg), "discovery": discovery}
+
+    def _discover(self, state: TripState, req: dict, named: list[str],
+                  visited: set[str]) -> tuple[list[dict] | None, dict]:
+        """Town search -> LLM circuits -> code check. Returns (circuits, info); circuits is None
+        when the caller should fall back to the rule-based circuit list."""
+        info: dict[str, Any] = {"method": "search", "attempts": 0, "rejected": []}
+
+        def ready(d: str) -> bool:
+            return d in DESTINATIONS and d not in NOT_READY
+
+        query = " ".join(req.get("interests") or []) or "a relaxing hill trip"
+        try:  # a named town is looked up by name; the rest are found by meaning
+            found = _rerank_towns(
+                self.retriever.search(query, top_k=TOWN_SEARCH_K, namespace=TOWN_NAMESPACE,
+                                      filter={"type": "Town"}),
+                req.get("interests") or [])
+            named_hits = self.retriever.search(
+                query, top_k=max(1, len(named)), namespace=TOWN_NAMESPACE,
+                filter={"type": "Town",
+                        "city": {"$in": [DESTINATIONS[d]["name"] for d in named]}}) if named else []
+        except Exception:
+            log.exception("town search failed; using the rule-based circuits")
+            return None, {**info, "fallback": "town search failed"}
+        profiles = {h["id"]: h.get("text") or "" for h in [*found, *named_hits]}
+        pool = [d for d in named if ready(d)]
+        extras = [h["id"] for h in found if ready(h["id"]) and h["id"] not in pool]
+        if named:  # companions for a named town must be a short drive from one of them
+            extras = [d for d in extras
+                      if any((self._road_hours(n, d) or 99) <= MAX_COMPANION_HOURS for n in named)]
+            pool += extras[:4]
+        else:
+            pool += extras[:6]
+        info["candidates"] = pool
+        if not pool:
+            return None, {**info, "fallback": "no matching towns"}
+        saved = load_profiles()
+        codes = {short_code(d): d for d in pool}
+        lines = []
+        for d in pool:
+            season = self._season(d, req["month"])
+            text = profiles.get(d) or (saved.get(d) or {}).get("text") or DESTINATIONS[d]["name"]
+            note = f"season {season['status']}"
+            if season["status"] == "caution":
+                note += f" ({'; '.join(season.get('reasons') or [])})"
+            lines.append(f"- {short_code(d)} | {text[:320]} | {note}"
+                         + (" | visited before" if d in visited else ""))
+        roads = []
+        for i, a in enumerate(pool):
+            for b in pool[i + 1:]:
+                leg = transport_options(a, b)
+                if leg.get("found") and leg["hours"][1] <= 12:
+                    roads.append(f"{short_code(a)}-{short_code(b)} {leg['hours'][0]:g}-"
+                                 f"{leg['hours'][1]:g} h")
+        prefs = [m["text"] for m in state.get("memories") or [] if m.get("kind") == "preference"]
+        user = (f"Traveller: {req['days']} days, {req['people']} people, month {req['month']}, "
+                f"interests: {', '.join(req.get('interests') or []) or 'none given'}, "
+                f"pace: {req.get('pace') or 'balanced'}, children/elderly/health condition: "
+                f"{'yes' if req.get('vulnerable_travellers') else 'no'}.\n"
+                f"Towns the traveller named (must be included): "
+                f"{', '.join(short_code(d) for d in named) or 'none'}.\n"
+                + (f"Remembered preferences: {'; '.join(prefs[:6])}.\n" if prefs else "")
+                + "\nCANDIDATE TOWNS (code | profile | season this month):\n" + "\n".join(lines)
+                + "\n\nROAD TIMES between candidates:\n" + ("\n".join(roads) or "none"))
+        feedback = ""
+        valid: list[dict] = []
+        while info["attempts"] < MAX_CIRCUIT_ATTEMPTS and not valid:
+            info["attempts"] += 1
+            reply = self.llm.json(self.small, [
+                {"role": "system", "content": CIRCUIT_SYSTEM},
+                {"role": "user", "content": user + (f"\n\nFix these problems from the last "
+                                                    f"attempt: {feedback}" if feedback else "")}],
+                default={})
+            problems = []
+            for c in parse_circuits(reply, codes):
+                errors = check_circuit(c["towns"], req["days"], set(pool), self._road_leg)
+                if errors:
+                    info["rejected"].append({"towns": c["towns"], "errors": errors})
+                    problems.append(f"{' + '.join(short_code(t) for t in c['towns'])}: "
+                                    + "; ".join(errors))
+                elif all(set(c["towns"]) != set(v["towns"]) for v in valid):
+                    valid.append(c)  # the same towns in another order is the same circuit
+            feedback = " | ".join(problems) or "no circuits were returned"
+        info["llm_valid"] = len(valid)
+        # Code guarantees two options whatever the LLM returned: exactly the towns the traveller
+        # named (in a sensible order), and, for an open request, the best-matching town alone.
+        must = []
+        if named and days_ok(named := [d for d in named if d in pool], req["days"]):
+            must.append({"towns": _route_order(named), "why": "The towns you asked for."})
+        elif not named and pool:
+            must.append({"towns": [pool[0]], "why": "The closest match to your interests."})
+        for c in must:
+            if (not check_circuit(c["towns"], req["days"], set(pool), self._road_leg)
+                    and all(set(c["towns"]) != set(v["towns"]) for v in valid)):
+                valid.append(c)
+        if not valid:
+            return None, {**info, "fallback": "no proposed circuit passed the check"}
+        info["accepted"] = [c["towns"] for c in valid]
+        return valid, info
+
+    @staticmethod
+    def _road_leg(a: str, b: str) -> dict | None:
+        leg = transport_options(a, b)
+        return leg if leg.get("found") else None
+
+    def _road_hours(self, a: str, b: str) -> float | None:
+        leg = self._road_leg(a, b)
+        return float(leg["hours"][1]) if leg else None
 
     def _choose(self, state: TripState) -> TripState:
         picked = interrupt({"type": "choose",
                             "message": state.get("choose_msg") or "Which circuit would you like?",
                             "personalized_routes": state.get("personalized_routes", False),
                             "options": [{k: o.get(k) for k in ("id", "label", "reasons",
-                                                               "visited", "transfers")}
+                                                               "visited", "transfers", "why")}
                                         for o in state["options"]]})
         match = next((o for o in state["options"] if o["id"] == picked), state["options"][0])
         return {"destinations": match["destinations"]}
@@ -462,16 +636,19 @@ class TripPlanner:
             dest, (key, types, query, k) = task
             # strict: a search that keeps failing raises, instead of looking like "no results"
             hits = self.retriever.search(query, top_k=k, filter={
-                "city": DESTINATIONS[dest]["name"], "type": {"$in": types}},
+                "city": search_city(dest), "type": {"$in": types}},
                 strict=True, attempts=3)
-            return dest, key, [h["id"] for h in hits]
+            return dest, key, hits
 
         tasks = [(d, spec) for d in state["destinations"] for spec in specs]
         try:
             with ThreadPoolExecutor(max_workers=6) as pool:
-                found = list(pool.map(in_context(search), tasks))
+                hits_found = list(pool.map(in_context(search), tasks))
         except RetrievalError as exc:
             raise PlanningUnavailable(UNAVAILABLE_MSG) from exc
+        # Grade on the short search results first, then fetch full details only once.
+        hits_found, grading = self._grade(req, hits_found)
+        found = [(d, key, [h["id"] for h in hits]) for d, key, hits in hits_found]
         candidates, entities = {}, {}
         for dest in state["destinations"]:
             pools = {key: ids for d, key, ids in found if d == dest}
@@ -490,7 +667,43 @@ class TripPlanner:
             if not candidates[dest]["stops"] and not candidates[dest]["stays"]:
                 log.error("research found nothing for %s; treating as an outage", dest)
                 raise PlanningUnavailable(UNAVAILABLE_MSG)
-        return {"candidates": candidates, "entities": entities}
+        return {"candidates": candidates, "entities": entities, "grading": grading}
+
+    def _grade(self, req: dict, found: list) -> tuple[list, dict]:
+        """Self-RAG style relevance check on the things to see and do: one LLM call marks which
+        search results fit the interests, and those move to the front. Nothing is removed, so a
+        town never runs out of stops; with no interests, or an empty verdict, the similarity
+        order is kept."""
+        interests = req.get("interests") or []
+        if self.discovery != "search" or not interests or "grade" in self.ablate:
+            return found, {"graded": 0}
+        codes, lines = {}, []
+        for _, key, hits in found:
+            if key != "stops":
+                continue
+            for h in hits:
+                code = f"P{len(codes) + 1}"
+                codes[code] = h["id"]
+                lines.append(f"{code} | {h.get('name', '')} ({h.get('type', '')}, "
+                             f"{h.get('city', '')}): {(h.get('text') or '')[:120]}")
+        if not lines:
+            return found, {"graded": 0}
+        reply = self.llm.json(self.small, [
+            {"role": "system", "content": GRADE_SYSTEM},
+            {"role": "user", "content": f"Interests: {', '.join(interests)}\n\n"
+                                        + "\n".join(lines)}], default={})
+        keep = {codes[c] for c in (reply or {}).get("relevant") or []
+                if isinstance(c, str) and c in codes}
+        info = {"graded": len(lines), "relevant": len(keep)}
+        if not keep:
+            return found, info
+        out = []
+        for dest, key, hits in found:
+            if key == "stops":
+                hits = ([h for h in hits if h["id"] in keep]
+                        + [h for h in hits if h["id"] not in keep])
+            out.append((dest, key, hits))
+        return out, info
 
     # ---------------- supervisor: specialist agents ----------------
     def _specialists(self, state: TripState) -> TripState:

@@ -51,3 +51,19 @@ def fmt_rate(k: int, n: int) -> str:
         return "n/a"
     lo, hi = wilson(k, n)
     return f"{100 * k / n:.0f}% ({100 * lo:.0f}-{100 * hi:.0f}%)"
+
+
+def fleiss_kappa(ratings: list[list[bool]]) -> float | None:
+    """Agreement among several raters on yes/no items, corrected for chance (Fleiss, 1971).
+    ratings[i] is every rater's verdict on item i (same number of raters per item).
+    1 = full agreement, 0 = what chance would give; None if it cannot be computed."""
+    rows = [r for r in ratings if r]
+    if not rows or len({len(r) for r in rows}) != 1 or len(rows[0]) < 2:
+        return None
+    n = len(rows[0])
+    p_items = [(sum(r) * (sum(r) - 1) + (n - sum(r)) * (n - sum(r) - 1)) / (n * (n - 1))
+               for r in rows]
+    p_bar = sum(p_items) / len(rows)
+    yes = sum(sum(r) for r in rows) / (n * len(rows))
+    p_e = yes ** 2 + (1 - yes) ** 2
+    return None if p_e == 1 else (p_bar - p_e) / (1 - p_e)

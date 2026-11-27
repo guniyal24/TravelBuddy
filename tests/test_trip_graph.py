@@ -170,3 +170,13 @@ def test_unknown_alias_is_reported_by_critic_not_silently_accepted():
     tp.start("t8", "x")
     tp.resume("t8", "destination_haridwar+destination_rishikesh")
     assert "A99" in llm.prompts[-1]
+
+
+def test_follow_up_answer_cannot_drop_vulnerable_travellers():
+    first = {"days": 3, "month": 6, "interests": [], "vulnerable_travellers": True}
+    tp, _ = make([first, {"people": 3, "vulnerable_travellers": False}])
+    r = tp.start("tv", "Badrinath for 3 days in June with my 70-year-old parents")
+    assert r["prompt"]["type"] == "ask"
+    tp.resume("tv", "3 people")
+    state = tp.graph.get_state({"configurable": {"thread_id": "tv"}}).values
+    assert state["request"]["people"] == 3 and state["request"]["vulnerable_travellers"] is True

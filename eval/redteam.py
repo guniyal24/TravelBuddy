@@ -99,17 +99,17 @@ def main() -> int:
     from pinecone import Pinecone
 
     from app.config import Settings
-    from app.db.graph import GraphStore
     from app.graph.trip_graph import TripPlanner
     from app.rag.factory import build_llm_clients, build_self_rag
     from app.rag.llm import LLM
     from app.rag.retriever import Retriever
     from eval.judge import JuryJudge, VerdictCache
+    from eval.plans import open_store
     from eval.run import kb_index
     from mcp_server.client import LocalTools
 
     s = Settings()
-    store = GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database)
+    store, _ = open_store(s)  # Neo4j, or the bundled snapshot when it is unreachable
     rag = build_self_rag(s, store)
     rag.llm.retries = 6
     chat, embed = build_llm_clients(s)
@@ -121,7 +121,7 @@ def main() -> int:
     index = Pinecone(api_key=s.pinecone_api_key).Index(s.pinecone_index_name)
     planner = TripPlanner(LLM(chat, retries=6), Retriever(embed, index, s.embed_model), store,
                           s.router_model, s.planner_model, checkpointer=MemorySaver(),
-                          tools=LocalTools())
+                          tools=LocalTools(), discovery=s.town_discovery)
 
     rows = []
     for aid, question, checks in CHAT_ATTACKS:

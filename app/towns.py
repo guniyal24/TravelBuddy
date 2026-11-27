@@ -36,5 +36,12 @@ STATIONS: dict[str, tuple[str, str]] = {t["id"]: tuple(t["station"]) for t in to
                                         if t.get("station")}
 KUMAON: set[str] = {t["id"] for t in towns() if t.get("region") == "Kumaon"}
 ACCESS_NOTES: dict[str, str] = {t["id"]: t["access_note"] for t in towns() if t.get("access_note")}
+def search_city(destination_id: str) -> str:
+    """The `city` a place carries in Pinecone (from its destination id, see
+    ingest.load.pinecone_record). It differs from the display name for some towns:
+    destination_ghangaria is "Ghangaria" there, "Valley of Flowers (Ghangaria)" on screen."""
+    return destination_id.removeprefix("destination_").replace("_", " ").title()
+
+
 CIRCUITS: list[tuple[list[str], int]] = [(list(c[0]), int(c[1]))
                                          for c in _load().get("circuits") or []]
