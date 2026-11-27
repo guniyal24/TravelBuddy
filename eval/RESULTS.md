@@ -1,18 +1,18 @@
-# Evaluation results (2026-11-10)
+# Evaluation results (2026-11-28)
 
 | system | hit@k (answerable) | answers naming places not in data ↓ | answers the question | declines (unanswerable) | invents specifics (unanswerable) ↓ | LLM calls/q | latency s/q |
 |---|---|---|---|---|---|---|---|
-| no_rag | n/a | 73% (63-82%) | 100% (95-100%) | 16% (6-35%) | 80% (61-91%) | 1.0 | 19.6 |
-| baseline | 87% (78-93%) | 0% (0-5%) | 59% (48-70%) | 100% (87-100%) | 0% (0-13%) | 1.0 | 5.7 |
-| self_rag | 96% (89-99%) | 1% (0-7%) | 97% (91-99%) | 100% (87-100%) | 0% (0-13%) | 3.1 | 7.9 |
+| no_rag | n/a | 73% (63-82%) | 100% (95-100%) | 8% (2-25%) | 88% (70-96%) | 1.0 | 15.9 |
+| baseline | 86% (77-92%) | 3% (1-9%) | 66% (55-75%) | 100% (87-100%) | 0% (0-13%) | 1.0 | 6.3 |
+| self_rag | 95% (88-98%) | 1% (0-7%) | 99% (93-100%) | 100% (87-100%) | 0% (0-13%) | 3.1 | 9.7 |
 
 **Answers the question, by language** (answerable questions)
 
 | system | English | Hindi | Hinglish |
 |---|---|---|---|
 | no_rag | 100% (95-100%) | 100% (51-100%) | 100% (68-100%) |
-| baseline | 61% (49-72%) | 25% (5-70%) | 62% (31-86%) |
-| self_rag | 99% (92-100%) | 100% (51-100%) | 88% (53-98%) |
+| baseline | 64% (52-75%) | 50% (15-85%) | 88% (53-98%) |
+| self_rag | 99% (92-100%) | 100% (51-100%) | 100% (68-100%) |
 
 Golden set: 79 answerable + 25 unanswerable questions (`eval/golden.yaml`), in English, Hindi and Hinglish, including prompt-injection and false-premise questions. Each cell is a rate with its 95% Wilson interval. ↓ = lower is better.
 
