@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     trips_path: str = "data/trips.sqlite"  # saved trips, profiles, checklist state
     mcp_transport: str = "memory"  # "memory" (in-process MCP) or "stdio" (subprocess server)
     rag_mode: str = "self"  # "self" (Self-RAG graph) or "hybrid" (prototype pipeline)
+    # How the planner finds circuits: "search" (Pinecone town profiles, LLM-proposed circuits
+    # checked in code) or "rules" (score the curated circuit list). "search" falls back to
+    # "rules" by itself when town search or the LLM proposals fail.
+    town_discovery: str = "search"
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 

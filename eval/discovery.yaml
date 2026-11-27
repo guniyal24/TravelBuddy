@@ -1,0 +1,40 @@
+# Open trip requests (no town named) for eval/plans.py --set discovery. They test how well the
+# planner finds towns on its own, which eval/scenarios.yaml barely covers (2 of 30 requests).
+#   fits   destination ids that suit the request, labelled by hand before any run; a circuit
+#          "fits" if it includes at least one of them. Other checks are as in scenarios.yaml.
+scenarios:
+  - {id: d01, text: "4 days in November for 2 people, we love lakes and boating",
+     expect: {days: 4, fits: [destination_nainital, destination_bhimtal]}}
+  - {id: d02, text: "Wildlife safari with a chance to see tigers, 3 days, family of 4, March",
+     expect: {days: 3, fits: [destination_jim_corbett]}}
+  - {id: d03, text: "5 days of snow and skiing in January for 2 friends",
+     expect: {days: 5, fits: [destination_auli, destination_joshimath]}}
+  - {id: d04, text: "Temples and the evening Ganga aarti, 3 days, 2 people, October",
+     expect: {days: 3, fits: [destination_haridwar, destination_rishikesh]}}
+  - {id: d05, text: "Tea gardens and Himalayan sunrise views for a couple, 3 days in April",
+     expect: {days: 3, fits: [destination_kausani]}}
+  - {id: d06, text: "Valley of flowers trek, 4 days, 2 friends, August",
+     expect: {days: 4, fits: [destination_ghangaria, destination_joshimath]}}
+  - {id: d07, text: "White water rafting and cafes for 3 days, 3 friends, March",
+     expect: {days: 3, fits: [destination_rishikesh]}}
+  - {id: d08, text: "A quiet forest getaway with birdwatching, 3 days, 2 people, November",
+     expect: {days: 3, fits: [destination_binsar, destination_chakrata, destination_lansdowne,
+                              destination_chopta, destination_bhimtal, destination_dhanaulti]}}
+  - {id: d09, text: "A pilgrimage to the high Himalayan temples, 6 days, 2 people, June",
+     expect: {days: 6, fits: [destination_kedarnath, destination_badrinath, destination_gangotri,
+                              destination_uttarkashi]}}
+  - {id: d10, text: "Heritage, local crafts and mountain culture for 3 days, 2 people, October",
+     expect: {days: 3, fits: [destination_almora]}}
+  - {id: d11, text: "Ek shant pahadi jagah, 3 din, 2 log, December, barf dekhni hai",
+     expect: {days: 3, fits: [destination_auli, destination_dhanaulti, destination_kanatal,
+                              destination_munsiyari, destination_chopta, destination_joshimath]}}
+  - {id: d12, text: "Family trip with small kids, easy sightseeing and a mall road, 3 days, 4 people, May",
+     expect: {days: 3, fits: [destination_mussoorie, destination_nainital]}}
+  - {id: d13, text: "मंदिर और गंगा आरती, 2 दिन, 2 लोग, नवंबर",
+     expect: {days: 2, fits: [destination_haridwar, destination_rishikesh]}}
+  - {id: d14, text: "Camping under the stars and a short trek, 3 days, 2 friends, October",
+     expect: {days: 3, fits: [destination_kanatal, destination_chopta, destination_dhanaulti,
+                              destination_chakrata]}}
+  - {id: d15, text: "Honeymoon in the hills with great views, 4 days in December, premium stay",
+     followup: "2 people",
+     expect: {days: 4, fits: [destination_mussoorie, destination_nainital, destination_auli]}}

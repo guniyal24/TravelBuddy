@@ -1,7 +1,8 @@
 """Plan-quality evaluation: run the real trip planner on eval/scenarios.yaml and score every
 plan in code (no LLM judge), so the numbers are exactly reproducible from the saved plans.
 
-    python -m eval.plans [--limit N] [--only p01 p02]
+    python -m eval.plans [--limit N] [--only p01 p02] [--discovery search|rules]
+                         [--set scenarios|discovery]
 
 Checks, each reported as a pass rate with a 95% interval over the scenarios it applies to:
   completes        the planner reached the approval step without an error
@@ -15,6 +16,9 @@ Checks, each reported as a pass rate with a 95% interval over the scenarios it a
   health_noted     vulnerable travellers going above 2,500 m get a health note
   valid_first_try  the LLM's first draft passed the Critic (no retry, no fallback)
   no_fallback      the plan came from the LLM, not the rule-based fallback
+  fits_first       open requests (no town named): the first circuit offered has a town that
+                   fits the request (hand-labelled in eval/discovery.yaml)
+  fits_any         ... any of the circuits offered has one
 Writes eval/PLANS.md and the raw plans to eval/results/<date>-plans.json.
 """
 import argparse
@@ -36,7 +40,7 @@ ROOT = Path(__file__).resolve().parent
 CHECKS = ["completes", "known_places", "day_count", "towns_covered", "named_first",
           "meals_in_town",
           "stays_nightly", "veg_respected", "budget_honest", "health_noted", "valid_first_try",
-          "no_fallback"]
+          "no_fallback", "fits_first", "fits_any"]
 LABELS = {
     "completes": "reaches the approval step", "day_count": "exact number of days",
     "known_places": "every place exists in our data",
@@ -45,6 +49,7 @@ LABELS = {
     "veg_respected": "veg diet respected", "budget_honest": "budget fits or is flagged",
     "health_noted": "health note above 2,500 m", "valid_first_try": "LLM draft valid first try",
     "no_fallback": "no rule-based fallback needed",
+    "fits_first": "open request: 1st circuit fits", "fits_any": "open request: a circuit fits",
 }
 log = logging.getLogger(__name__)
 
@@ -54,6 +59,10 @@ def score(sc: dict, run: dict) -> dict:
     exp = sc.get("expect", {})
     out: dict[str, bool | None] = dict.fromkeys(CHECKS)
     out["completes"] = run.get("reached") == "approve"
+    fits = set(exp.get("fits") or [])
+    if fits and run.get("options") is not None:  # scored on the offer, even if planning failed
+        out["fits_first"] = bool(run["options"]) and bool(fits & set(run["options"][0]))
+        out["fits_any"] = any(fits & set(o) for o in run["options"])
     if not out["completes"]:
         return out
     plan, ents = run["plan"], run["entities"]
@@ -84,11 +93,23 @@ def score(sc: dict, run: dict) -> dict:
     return out
 
 
-def build_planner(ablate: frozenset = frozenset()):
+def open_store(s):
+    """Neo4j if it answers, else the bundled snapshot (the same data the live demo serves
+    when Aura is paused). Returns (store, mode)."""
+    from app.db.graph import UNAVAILABLE, GraphStore
+    from app.db.snapshot import SNAPSHOT_PATH, SnapshotGraph
+
+    try:
+        return GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database), "neo4j"
+    except (*UNAVAILABLE, OSError, ValueError) as exc:
+        log.warning("Neo4j unavailable (%s); using the bundled snapshot", type(exc).__name__)
+        return SnapshotGraph(SNAPSHOT_PATH), "snapshot"
+
+
+def build_planner(ablate: frozenset = frozenset(), discovery: str | None = None):
     from pinecone import Pinecone
 
     from app.config import Settings
-    from app.db.graph import GraphStore
     from app.graph.trip_graph import TripPlanner
     from app.rag.factory import build_llm_clients
     from app.rag.llm import LLM
@@ -99,10 +120,11 @@ def build_planner(ablate: frozenset = frozenset()):
     chat, embed = build_llm_clients(s)
     index = Pinecone(api_key=s.pinecone_api_key).Index(s.pinecone_index_name)
     llm = LLM(chat, retries=6)  # batch job: wait out rate limits instead of failing
-    store = GraphStore(s.neo4j_uri, s.neo4j_user, s.neo4j_password, s.neo4j_database)
+    store, mode = open_store(s)
     tp = TripPlanner(llm, Retriever(embed, index, s.embed_model), store, s.router_model,
                      s.planner_model, checkpointer=MemorySaver(), tools=LocalTools(),
-                     ablate=ablate)
+                     ablate=ablate, discovery=discovery or s.town_discovery)
+    tp.store_mode = mode
     return tp, llm
 
 
@@ -125,6 +147,8 @@ def run_scenario(tp, sc: dict) -> dict:
     if r["status"] == "waiting" and r["prompt"]["type"] == "choose":
         options = r["prompt"]["options"]
         run["first_option"] = options[0]["id"].split("+") if options else []
+        run["options"] = [o["id"].split("+") for o in options]
+        run["why"] = [o.get("why") or "" for o in options]
         pick = next((o["id"] for o in options if towns and towns <= set(o["id"].split("+"))),
                     options[0]["id"])
         r = add(tp.resume(tid, pick))
@@ -139,19 +163,26 @@ def run_scenario(tp, sc: dict) -> dict:
                                                "semantic_text")}
                      for i, e in (vals.get("entities") or {}).items() if i in used},
         "warnings": vals.get("warnings"), "cost": vals.get("cost"),
-        "plan_attempts": vals.get("plan_attempts"), "asks": asks})
+        "plan_attempts": vals.get("plan_attempts"), "asks": asks,
+        "discovery": vals.get("discovery"), "grading": vals.get("grading")})
     return run
 
 
-def write_report(rows: list[dict], path: Path) -> None:
+def write_report(rows: list[dict], path: Path, store_mode: str = "neo4j",
+                 discovery: str = "search") -> None:
+    how = ("town search over Pinecone town profiles, LLM-proposed circuits checked in code"
+           if discovery == "search" else "rule-based circuit list")
     lines = [f"# Plan quality ({date.today()})", "",
              f"{len(rows)} trip requests (`eval/scenarios.yaml`), run through the real planner "
-             "(LLM planner, rule-based Critic and agents). Every check is computed in code from "
-             "the saved plan; no LLM judge. Rates with 95% Wilson intervals, over the scenarios "
-             "each check applies to.", "",
+             f"({how}; LLM planner, rule-based Critic and agents; place details from "
+             f"{'Neo4j' if store_mode == 'neo4j' else 'the bundled graph snapshot'}). Every "
+             "check is computed in code from the saved plan; no LLM judge. Rates with 95% "
+             "Wilson intervals, over the scenarios each check applies to.", "",
              "| check | pass rate | scenarios |", "|---|---|---|"]
     for c in CHECKS:
         vals = [r["score"][c] for r in rows if r["score"][c] is not None]
+        if not vals:
+            continue
         lines.append(f"| {LABELS[c]} | {fmt_rate(sum(vals), len(vals))} | {len(vals)} |")
     fails = [(r["id"], c) for r in rows for c in CHECKS if r["score"][c] is False]
     lat = sorted(r["latency_s"] for r in rows)
@@ -181,15 +212,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only", nargs="*")
-    ap.add_argument("--ablate", nargs="*", default=[], choices=["critic", "food"],
+    ap.add_argument("--ablate", nargs="*", default=[], choices=["critic", "food", "grade"],
                     help="switch components off (results saved separately; PLANS.md untouched)")
+    ap.add_argument("--discovery", choices=["search", "rules"],
+                    help="how circuits are found (default: the app setting, 'search')")
+    ap.add_argument("--set", default="scenarios", choices=["scenarios", "discovery"],
+                    help="discovery: the open requests in eval/discovery.yaml")
     args = ap.parse_args()
-    scenarios = yaml.safe_load((ROOT / "scenarios.yaml").read_text())["scenarios"]
+    scenarios = yaml.safe_load((ROOT / f"{args.set}.yaml").read_text())["scenarios"]
     if args.only:
         scenarios = [s for s in scenarios if s["id"] in args.only]
     if args.limit:
         scenarios = scenarios[: args.limit]
-    tp, llm = build_planner(frozenset(args.ablate))
+    tp, llm = build_planner(frozenset(args.ablate), args.discovery)
+    print(f"discovery={tp.discovery} store={tp.store_mode}")
     rows = []
     for sc in scenarios:
         before, t0 = llm.calls, time.time()
@@ -208,14 +244,21 @@ def main() -> None:
     out = ROOT / "results"
     out.mkdir(exist_ok=True)
     tag = "-no-" + "-no-".join(sorted(args.ablate)) if args.ablate else ""
+    tag += "-rules" if tp.discovery == "rules" else ""
+    tag += "-discovery" if args.set == "discovery" else ""
     (out / f"{date.today()}-plans{tag}.json").write_text(
         json.dumps(rows, indent=2, ensure_ascii=False))
+    if tp.discovery == "rules" or args.set == "discovery":
+        from eval.discovery import write_discovery
+        write_discovery()
+        print("\n" + (ROOT / "DISCOVERY.md").read_text())
+        return
     if args.ablate:
         from eval.ablations import write_ablations
         write_ablations()
         print("\n" + (ROOT / "ABLATIONS.md").read_text())
         return
-    write_report(rows, ROOT / "PLANS.md")
+    write_report(rows, ROOT / "PLANS.md", tp.store_mode, tp.discovery)
     print("\n" + (ROOT / "PLANS.md").read_text())
 
 

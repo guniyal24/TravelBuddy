@@ -215,24 +215,36 @@ class JuryJudge:
             self.cache.put(key, verdict)
         return verdict
 
-    def __call__(self, question: str, answer: str, kb: dict) -> dict:
+    def raw_votes(self, question: str, answer: str) -> dict:
+        """Every juror's every sampled verdict: {(model, sample): verdict}."""
         jobs = {(m, s): self._pool.submit(self._one, m, s, question, answer)
                 for m in self.jury for s in range(self.samples)}
-        raw = {k: f.result() for k, f in jobs.items()}
-        items, votes, agreement = {}, {}, {}
-        for item in ITEMS:
-            per_juror = {m: _majority([raw[(m, s)][item] for s in range(self.samples)])
-                         for m in self.jury}
-            final = _majority(list(per_juror.values()))
-            all_votes = [raw[(m, s)][item] for m in self.jury for s in range(self.samples)]
-            valid = [v for v in all_votes if v is not None]
-            items[item] = bool(final)
-            votes[item] = per_juror
-            agreement[item] = sum(v == bool(final) for v in valid) / len(valid) if valid else 0.0
-        places, ungrounded = grounding([p for v in raw.values() for p in v["named_places"]],
-                                       answer, kb)
-        failed = sum(1 for verdict in raw.values() if all(verdict[i] is None for i in ITEMS))
-        return {**_derive(items, ungrounded), "items": items, "votes": votes,
-                "agreement": agreement, "named_places": places,
-                "ungrounded_places": ungrounded, "version": JUDGE_VERSION,
-                "failed_calls": failed, "complete": failed == 0}
+        return {k: f.result() for k, f in jobs.items()}
+
+    def __call__(self, question: str, answer: str, kb: dict) -> dict:
+        return combine(self.raw_votes(question, answer), self.jury, self.samples, answer, kb)
+
+
+def combine(raw: dict, jury: list[str], samples: int, answer: str, kb: dict) -> dict:
+    """Majority of each juror's samples, then majority across jurors (a tie is no verdict),
+    plus the code checks on the named places. Works on any subset of the votes, which is how
+    eval/jury_study.py compares one, two and three jurors on the same calls."""
+    items, votes, agreement, unresolved = {}, {}, {}, []
+    for item in ITEMS:
+        per_juror = {m: _majority([raw[(m, s)][item] for s in range(samples)]) for m in jury}
+        final = _majority(list(per_juror.values()))
+        if final is None:
+            unresolved.append(item)
+        all_votes = [raw[(m, s)][item] for m in jury for s in range(samples)]
+        valid = [v for v in all_votes if v is not None]
+        items[item] = bool(final)
+        votes[item] = per_juror
+        agreement[item] = sum(v == bool(final) for v in valid) / len(valid) if valid else 0.0
+    places, ungrounded = grounding([p for (m, s), v in raw.items() if m in jury and s < samples
+                                    for p in v["named_places"]], answer, kb)
+    failed = sum(1 for (m, s), v in raw.items()
+                 if m in jury and s < samples and all(v[i] is None for i in ITEMS))
+    return {**_derive(items, ungrounded), "items": items, "votes": votes,
+            "agreement": agreement, "named_places": places, "unresolved": unresolved,
+            "ungrounded_places": ungrounded, "version": JUDGE_VERSION,
+            "failed_calls": failed, "complete": failed == 0}

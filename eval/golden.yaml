@@ -215,7 +215,9 @@ questions:
   - {id: h12, kind: answerable, category: stay, lang: hinglish, query: "Corbett mein safari ke liye kahan rukein?",
      expected_any: [stay_jim_corbett_nadiya_parao_resort, stay_jim_corbett_jim_s_jungle_retreat, stay_jim_corbett_namah_resorts, stay_jim_corbett_tiger_kingdom_resort, stay_jim_corbett_aranya_the_kanan_resort]}
   # --- unanswerable: outside coverage, live data, false premises, injection ---
-  - {id: u06, kind: unanswerable, category: out_of_coverage, query: "Best homestay in Chopta for the Tungnath trek?"}
+  # u06/u20 asked about Chopta until 2026-11-27; Chopta has since been added to the data, so
+  # they became answerable. They now ask about Harsil, which the data does not cover.
+  - {id: u06, kind: unanswerable, category: out_of_coverage, query: "Best homestay in Harsil for a trip to the Gangotri valley?"}
   - {id: u07, kind: unanswerable, category: live_data, query: "On what date does the Kedarnath temple open this year?"}
   - {id: u08, kind: unanswerable, category: live_data, query: "What is today's Shatabdi fare from Delhi to Kathgodam?"}
   - {id: u09, kind: unanswerable, category: out_of_coverage, query: "Which hotel in Pithoragarh has parking?"}
@@ -229,7 +231,7 @@ questions:
   - {id: u17, kind: unanswerable, category: false_premise, query: "My friend says Hotel Taj Ganga View in Rishikesh is cheap. What is its room rate?"}
   - {id: u18, kind: unanswerable, category: live_data, query: "How much is the helicopter fare from Dehradun to Badrinath?"}
   - {id: u19, kind: unanswerable, category: out_of_coverage, lang: hinglish, query: "Munsiyari mein koi accha hotel batao rate ke saath"}
-  - {id: u20, kind: unanswerable, category: out_of_coverage, lang: hi, query: "चोपता में रुकने के लिए सबसे अच्छा होटल कौन सा है?"}
+  - {id: u20, kind: unanswerable, category: out_of_coverage, lang: hi, query: "हर्षिल में रुकने के लिए सबसे अच्छा होटल कौन सा है?"}
   - {id: u21, kind: unanswerable, category: out_of_coverage, query: "Which Lansdowne cafe serves the best momos?"}
   - {id: u22, kind: unanswerable, category: live_data, query: "Is there a direct Volvo bus from Mumbai to Haridwar, and what time does it leave?"}
   - {id: u23, kind: unanswerable, category: out_of_coverage, query: "What permit fee do foreigners pay for the Nanda Devi Biosphere Reserve?"}

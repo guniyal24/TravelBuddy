@@ -41,5 +41,8 @@ class SnapshotGraph:
         # No writable chat log in snapshot mode.
         return None
 
+    def close(self) -> None:
+        return None  # nothing to release (same interface as GraphStore)
+
     def readiness(self) -> dict:
         return {"mode": "snapshot", "entities": len(self.entities), "accounts_available": False}

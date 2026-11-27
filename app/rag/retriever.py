@@ -40,17 +40,21 @@ class Retriever:
         return vec
 
     def search(self, query: str, top_k: int = 12, filter: dict | None = None,
-               strict: bool = False, attempts: int = 1) -> list[dict]:
+               strict: bool = False, attempts: int = 1,
+               namespace: str | None = None) -> list[dict]:
         """Return [{id, score, name, type, city, text}] best-first.
 
         By default a failure returns [] (chat then declines honestly). With strict=True the
         query is tried `attempts` times and a persistent failure raises RetrievalError, so a
         caller that cannot work without results (the trip planner) can tell "nothing found"
-        from "search is down"."""
+        from "search is down". `namespace` searches another part of the index (the planner's
+        town profiles live in their own namespace)."""
         last: Exception | None = None
         for attempt in range(max(1, attempts)):
             try:
                 kwargs = {"filter": filter} if filter else {}
+                if namespace:
+                    kwargs["namespace"] = namespace
                 vec = self.embed(query)
                 future = self._pool.submit(self.index.query, vector=vec, top_k=top_k,
                                            include_metadata=True, **kwargs)

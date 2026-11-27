@@ -1,0 +1,513 @@
+[
+ {
+  "id": "destination_haridwar",
+  "name": "Haridwar",
+  "region": "Garhwal",
+  "elevation_m": 250,
+  "themes": [
+   "temple",
+   "pilgrim",
+   "aarti",
+   "ganga",
+   "spiritual"
+  ],
+  "counts": {
+   "sights": 9,
+   "eateries": 16,
+   "stays": 22
+  },
+  "text": "Haridwar (Garhwal, 250 m). Har Ki Pauri Haridwar (huh-rihd-wahr), literally meaning Gateway to God, is one of the seven holiest Hindu places (Sapta Puri) in India and has been a centre of Hindu religion and pilgrimage for centuries. Good for: temple, pilgrim, aarti, ganga, spiritual. Highlights: Har Ki Pauri, Mansa Devi Temple, Chandi Devi Temple, Daksheswar Mahadev Temple, Bharat Mata Mandir, Sureshwari Devi Temple. 9 things to see and do, 16 eateries, 22 stays (budget, mid, premium)."
+ },
+ {
+  "id": "destination_rishikesh",
+  "name": "Rishikesh",
+  "region": "Garhwal",
+  "elevation_m": 340,
+  "themes": [
+   "yoga",
+   "rafting",
+   "adventure",
+   "cafe",
+   "ashram",
+   "meditation",
+   "music"
+  ],
+  "counts": {
+   "sights": 20,
+   "eateries": 8,
+   "stays": 35
+  },
+  "text": "Rishikesh (Garhwal, 340 m). The Ganges flowing through Rishikesh Rishikesh is a name derived from the Hindu God Vishnu, composed of hṛṣīka meaning 'senses' and īśa meaning 'lord' for a combined meaning as 'Lord of the Senses'. Good for: yoga, rafting, adventure, cafe, ashram, meditation, music. Highlights: Swarg Ashram, Triveni Ghat, Neelkanth Mahadev Mela, Chaurasi Kutia, Gita Bhavan, Bharat Mandir. 20 things to see and do, 8 eateries, 35 stays (budget, mid, premium)."
+ },
+ {
+  "id": "destination_dehradun",
+  "name": "Dehradun",
+  "region": "Garhwal",
+  "elevation_m": 640,
+  "themes": [
+   "food",
+   "cafe",
+   "shopping",
+   "museum",
+   "family"
+  ],
+  "counts": {
+   "sights": 18,
+   "eateries": 21,
+   "stays": 14
+  },
+  "text": "Dehradun (Garhwal, 640 m). Dehradun (dayh-RAH-doon) has experienced tremendous growth, and has a population of around 550,000. It is also famous for the Doon School, often called the \"Eton of India\". Good for: food, cafe, shopping, museum, family. Highlights: The Char Siddhs, Wadia Institute of Himalayan Geology, Robber's Cave, The Forest Research Institute Museums, Ram Rai Darbar, The Kalinga War Memorial. 18 things to see and do, 21 eateries, 14 stays (budget, mid, premium)."
+ },
+ {
+  "id": "destination_mussoorie",
+  "name": "Mussoorie",
+  "region": "Garhwal",
+  "elevation_m": 2000,
+  "themes": [
+   "hill",
+   "honeymoon",
+   "waterfall",
+   "mall road",
+   "views",
+   "family",
+   "snow"
+  ],
+  "counts": {
+   "sights": 17,
+   "eateries": 16,
+   "stays": 14
+  },
+  "text": "Mussoorie (Garhwal, 2,000 m). View of the hills in Mussoorie towards sunset Its history dates back to 1827 when Captain Young, an adventurous military officer, explored the site and laid the foundation of this holiday town. Good for: hill, honeymoon, waterfall, mall road, views, family, snow. Highlights: Gun Hill Point, Tibetan Buddhist Temple, Lake Mist, Jhari Pani Falls, Lal Tibba, Bhatta falls. 17 things to see and do, 16 eateries, 14 stays."
+ },
+ {
+  "id": "destination_auli",
+  "name": "Auli",
+  "region": "Garhwal",
+  "elevation_m": 2800,
+  "themes": [
+   "ski",
+   "snow",
+   "skiing",
+   "trek",
+   "adventure",
+   "views",
+   "honeymoon"
+  ],
+  "counts": {
+   "sights": 4,
+   "eateries": 5,
+   "stays": 9
+  },
+  "text": "Auli (Garhwal, 2,800 m). 300px Good for: ski, snow, skiing, trek, adventure, views, honeymoon. Highlights: Padiyar devatha temple, Narsingh Temple, Gurudwara Sri Hemkunt Sahib (Joshimath), Jyoti Vidyala. 4 things to see and do, 5 eateries, 9 stays."
+ },
+ {
+  "id": "destination_kedarnath",
+  "name": "Kedarnath",
+  "region": "Garhwal",
+  "elevation_m": 3580,
+  "themes": [
+   "pilgrim",
+   "temple",
+   "char dham",
+   "chardham",
+   "trek",
+   "spiritual"
+  ],
+  "counts": {
+   "sights": 17,
+   "eateries": 0,
+   "stays": 15
+  },
+  "text": "Kedarnath (Garhwal, 3,580 m). Near to Gaurikund- Kedarnath trail Kedarnath is one of the Char Dham Yatra (चार धाम यात्रा) Hindu pilgrim centers. The town and the temple are open from May to October, as there will be heavy snowfall in winter. Good for: pilgrim, temple, char dham, chardham, trek, spiritual. Highlights: Adi Shankaracharya Samadhi, Amrit Kund, Bhim Shila, Dhaulagiri, Hans Kund, Jagadguru Adi Shankaracharya Samadhi. 17 things to see and do, 0 eateries, 15 stays."
+ },
+ {
+  "id": "destination_badrinath",
+  "name": "Badrinath",
+  "region": "Garhwal",
+  "elevation_m": 3300,
+  "themes": [
+   "pilgrim",
+   "temple",
+   "char dham",
+   "chardham",
+   "spiritual"
+  ],
+  "counts": {
+   "sights": 8,
+   "eateries": 3,
+   "stays": 1
+  },
+  "text": "Badrinath (Garhwal, 3,300 m). 250px|A temple in Badrinath Badrinath (buh-DREE-nahth) is in the Garhwal hills, on the banks of the Alaknanda River, at an elevation of 3,133 m. The holy shrine here is the Badrinath Temple dedicated to Hindu god Vishnu. Good for: pilgrim, temple, char dham, chardham, spiritual. Highlights: Mana Village, Satopanth Tal, Vasudhara Falls, Vyas gufa, Nar Narayan Temple, Origin of Saraswati river. 8 things to see and do, 3 eateries, 1 stays."
+ },
+ {
+  "id": "destination_dhanaulti",
+  "name": "Dhanaulti",
+  "region": "Garhwal",
+  "elevation_m": 2286,
+  "themes": [
+   "forest",
+   "snow",
+   "quiet",
+   "views",
+   "family",
+   "camping"
+  ],
+  "counts": {
+   "sights": 7,
+   "eateries": 9,
+   "stays": 4
+  },
+  "text": "Dhanaulti (Garhwal, 2,286 m). Good for: forest, snow, quiet, views, family, camping. Highlights: Eco-Park, Surkanda Devi Temple, Aaloo Khet, Surkhunda mandir, point of view, Dhanaulti Eco Park Amber. 7 things to see and do, 9 eateries, 4 stays."
+ },
+ {
+  "id": "destination_kanatal",
+  "name": "Kanatal",
+  "region": "Garhwal",
+  "elevation_m": 2590,
+  "themes": [
+   "views",
+   "camping",
+   "adventure",
+   "snow",
+   "quiet"
+  ],
+  "counts": {
+   "sights": 9,
+   "eateries": 5,
+   "stays": 4
+  },
+  "text": "Kanatal (Garhwal, 2,590 m). A small ridge village on the Chamba-Mussoorie road, known for camping, apple orchards and views of the Garhwal Himalaya. Good for: views, camping, adventure, snow, quiet. Highlights: Surkanda Devi Mandir Tehri, Ujadgaon, Satyeshwar Mandir, Surkhunda mandir, Gurudwara Sahib New Tehri, Eid Gah. 9 things to see and do, 5 eateries, 4 stays."
+ },
+ {
+  "id": "destination_chakrata",
+  "name": "Chakrata",
+  "region": "Garhwal",
+  "elevation_m": 2118,
+  "themes": [
+   "forest",
+   "waterfall",
+   "quiet",
+   "trek",
+   "views"
+  ],
+  "counts": {
+   "sights": 6,
+   "eateries": 2,
+   "stays": 3
+  },
+  "text": "Chakrata (Garhwal, 2,118 m). Chakrata is a small and beautiful hill town located 2,118 metres above sea level. One can reach Chakrata by road only. Once a cantonment town in British India, Chakarata is blessed with natural beauty. Good for: forest, waterfall, quiet, trek, views. Highlights: Mahasu Devta Temple, Bajamara Tibba, Sao Jandri Tibba, Chirmiri Top, Gurudwara singh Sabha, Byas Shikhar. 6 things to see and do, 2 eateries, 3 stays."
+ },
+ {
+  "id": "destination_lansdowne",
+  "name": "Lansdowne",
+  "region": "Garhwal",
+  "elevation_m": 1706,
+  "themes": [
+   "quiet",
+   "forest",
+   "walks",
+   "views",
+   "heritage"
+  ],
+  "counts": {
+   "sights": 5,
+   "eateries": 2,
+   "stays": 4
+  },
+  "text": "Lansdowne (Garhwal, 1,706 m). A quiet cantonment hill town in Pauri Garhwal with oak and pine forests, old churches and the Garhwal Rifles museum. Good for: quiet, forest, walks, views, heritage. Highlights: St Mary Church, Siddh Baba Gumphanath Maa Devi Mandir, Santoshi Mata, Bayberry Adventures LLP, Tip In Top. 5 things to see and do, 2 eateries, 4 stays."
+ },
+ {
+  "id": "destination_joshimath",
+  "name": "Joshimath",
+  "region": "Garhwal",
+  "elevation_m": 1875,
+  "themes": [
+   "pilgrim",
+   "trek",
+   "ropeway",
+   "snow",
+   "views",
+   "gateway"
+  ],
+  "counts": {
+   "sights": 11,
+   "eateries": 5,
+   "stays": 8
+  },
+  "text": "Joshimath (Garhwal, 1,875 m). Joshimath, in the Garhwal Himalayas, is also known as Jyotirmath. It is on route from Haridwar and Rishikesh to the Hindu sacred shrine of Badrinath. Good for: pilgrim, trek, ropeway, snow, views, gateway. Highlights: Shanakaracharya Math, Narsinh Temple, Bhavishya Kedar Temple, Interpretation Center of Bio-Cultural Diversity., Tapovan, Jyotirmath Temple. 11 things to see and do, 5 eateries, 8 stays."
+ },
+ {
+  "id": "destination_ghangaria",
+  "name": "Valley of Flowers (Ghangaria)",
+  "region": "Garhwal",
+  "elevation_m": 3050,
+  "themes": [
+   "trek",
+   "flowers",
+   "nature",
+   "pilgrim",
+   "meadows"
+  ],
+  "counts": {
+   "sights": 8,
+   "eateries": 2,
+   "stays": 6
+  },
+  "text": "Valley of Flowers (Ghangaria) (Garhwal, 3,050 m). Ghangaria is also some called Govinddham, even though this refers more to the Gurudwara grounds of the Sikh temple in Ghangaria. Climate The best time to visit the Valley of Flowers is July–August. Good for: trek, flowers, nature, pilgrim, meadows. Highlights: Lakshman Temple, Valley of Flowers National Park, Lakshman Mandir, Gurudwara Sri Hemkunt Sahib (Hemkunt), Tipra Bamak Glacier, Valley of Flowers. 8 things to see and do, 2 eateries, 6 stays."
+ },
+ {
+  "id": "destination_chopta",
+  "name": "Chopta",
+  "region": "Garhwal",
+  "elevation_m": 2680,
+  "themes": [
+   "trek",
+   "meadows",
+   "tungnath",
+   "snow",
+   "birding",
+   "camping"
+  ],
+  "counts": {
+   "sights": 7,
+   "eateries": 3,
+   "stays": 5
+  },
+  "text": "Chopta (Garhwal, 2,680 m). Kedarnath & Neelkanth peaks from Ukhimath, Rudraprayag Name right The name \"Uttarakhand\" (Hindi: उत्तराखंड oot-tuh-RAH-khuhnd) literally means the \"northern part\". Good for: trek, meadows, tungnath, snow, birding, camping. Highlights: Hanuman temple, Anusaya Mata Temple, Anusuya Mata Mandir, Attri Muni Cave, Tunganath, Chandrashila. 7 things to see and do, 3 eateries, 5 stays."
+ },
+ {
+  "id": "destination_uttarkashi",
+  "name": "Uttarkashi",
+  "region": "Garhwal",
+  "elevation_m": 1158,
+  "themes": [
+   "pilgrim",
+   "temple",
+   "river",
+   "trek",
+   "gateway"
+  ],
+  "counts": {
+   "sights": 14,
+   "eateries": 1,
+   "stays": 10
+  },
+  "text": "Uttarkashi (Garhwal, 1,158 m). Known as the Kashi of the North, Uttarkashi holds great religious importance with many temples, sacred ghats, and ashrams. Good for: pilgrim, temple, river, trek, gateway. Highlights: Dodi Tal, Dayara Bugyal, Gaumukh, Saat Taal, Chaurangi Khaal, Tapovan. 14 things to see and do, 1 eateries, 10 stays."
+ },
+ {
+  "id": "destination_gangotri",
+  "name": "Gangotri",
+  "region": "Garhwal",
+  "elevation_m": 3100,
+  "themes": [
+   "pilgrim",
+   "char dham",
+   "chardham",
+   "temple",
+   "trek",
+   "glacier"
+  ],
+  "counts": {
+   "sights": 9,
+   "eateries": 0,
+   "stays": 4
+  },
+  "text": "Gangotri (Garhwal, 3,100 m). Gangotri is one of the most visited holy places in India. This Himalayan place is believed to be the spot where Ganga, the Ganges River goddess, touched earth for the first time. Good for: pilgrim, char dham, chardham, temple, trek, glacier. Highlights: Gantori temple, Gangotri Temple, Manda I, Cave, Gangotri, Bhairon Jhamp. 9 things to see and do, 0 eateries, 4 stays."
+ },
+ {
+  "id": "destination_nainital",
+  "name": "Nainital",
+  "region": "Kumaon",
+  "elevation_m": 2000,
+  "themes": [
+   "lake",
+   "boating",
+   "hill",
+   "honeymoon",
+   "views",
+   "family"
+  ],
+  "counts": {
+   "sights": 10,
+   "eateries": 12,
+   "stays": 33
+  },
+  "text": "Nainital (Kumaon, 2,000 m). Nainital lake in the morning Set amidst the towering peaks of the Kumaon Hills, the lake resort of Nainital has a lot to offer. Good for: lake, boating, hill, honeymoon, views, family. Highlights: Snow View, Neem Karoli Baba Ashram & Temple, Kainchi, Guano Hills, Naina Devi Temple, Sariyatal Lake, Naina Lake. 10 things to see and do, 12 eateries, 33 stays (budget, mid, premium)."
+ },
+ {
+  "id": "destination_jim_corbett",
+  "name": "Jim Corbett",
+  "region": "Kumaon",
+  "elevation_m": 400,
+  "themes": [
+   "wildlife",
+   "safari",
+   "tiger",
+   "nature",
+   "jungle",
+   "birding",
+   "family"
+  ],
+  "counts": {
+   "sights": 2,
+   "eateries": 1,
+   "stays": 6
+  },
+  "text": "Jim Corbett (Kumaon, 400 m). Once inside the park, you get to enjoy a spectacular panorama of the jungle, reminding you of Kipling's Jungle Book. Apart from this, you can see and photograph many species of birds, mammals, reptiles, flora, etc. Good for: wildlife, safari, tiger, nature, jungle, birding, family. Highlights: Aahana Resorts in Corbett National Park, Camp tour of Corbett National Park. 2 things to see and do, 1 eateries, 6 stays."
+ },
+ {
+  "id": "destination_almora",
+  "name": "Almora",
+  "region": "Kumaon",
+  "elevation_m": 1650,
+  "themes": [
+   "culture",
+   "heritage",
+   "craft",
+   "food",
+   "views",
+   "quiet"
+  ],
+  "counts": {
+   "sights": 10,
+   "eateries": 7,
+   "stays": 18
+  },
+  "text": "Almora (Kumaon, 1,650 m). Almora is a town of about 36,000 (2011) in the Kumaon mountains of the Himalayas in eastern Uttarakhand. Most of the town sits on a crescent-shaped mountain ridge about 5 km long, and most of it is above 1,800 m. Good for: culture, heritage, craft, food, views, quiet. Highlights: Nakshatra Kasar Observatory, Mahavatar Babaji Cave, Dana Golu Devta Temple, Golu Devta Temple, Chitai, Kalimat, Kasar Devi Temple. 10 things to see and do, 7 eateries, 18 stays (budget)."
+ },
+ {
+  "id": "destination_ranikhet",
+  "name": "Ranikhet",
+  "region": "Kumaon",
+  "elevation_m": 1830,
+  "themes": [
+   "quiet",
+   "golf",
+   "views",
+   "hill",
+   "nature",
+   "family"
+  ],
+  "counts": {
+   "sights": 6,
+   "eateries": 0,
+   "stays": 5
+  },
+  "text": "Ranikhet (Kumaon, 1,830 m). Good for: quiet, golf, views, hill, nature, family. Highlights: Sitalakhet, Chaubatia Garden, Kalika golf links, Dwarahat, Bhalu dam, Ganga Maya Lake. 6 things to see and do, 0 eateries, 5 stays."
+ },
+ {
+  "id": "destination_bhimtal",
+  "name": "Bhimtal",
+  "region": "Kumaon",
+  "elevation_m": 1370,
+  "themes": [
+   "lake",
+   "boating",
+   "family",
+   "quiet",
+   "birding"
+  ],
+  "counts": {
+   "sights": 15,
+   "eateries": 12,
+   "stays": 13
+  },
+  "text": "Bhimtal (Kumaon, 1,370 m). Bhimtal is quieter than Nainital and is spread around the lake. Most visitors come for the lake, the surrounding countryside and the nearby temples and lakes. Good for: lake, boating, family, quiet, birding. Highlights: Bhimeshwar Mahadev Temple, Bhimtal Lake, Prof Govind Balapant, Pailot Baba ashram, Ghorakhal Temple, Karkot Dhar. 15 things to see and do, 12 eateries, 13 stays."
+ },
+ {
+  "id": "destination_mukteshwar",
+  "name": "Mukteshwar",
+  "region": "Kumaon",
+  "elevation_m": 2171,
+  "themes": [
+   "views",
+   "orchard",
+   "quiet",
+   "adventure",
+   "temple",
+   "hill"
+  ],
+  "counts": {
+   "sights": 7,
+   "eateries": 6,
+   "stays": 15
+  },
+  "text": "Mukteshwar (Kumaon, 2,171 m). Good for: views, orchard, quiet, adventure, temple, hill. Highlights: Himalayan Ashram Satkhol, Gajar, Mukteshwar MahadevTemple, Abandand Cottage, Chali Ki Jali, IVRI Main Gate. 7 things to see and do, 6 eateries, 15 stays."
+ },
+ {
+  "id": "destination_kausani",
+  "name": "Kausani",
+  "region": "Kumaon",
+  "elevation_m": 1890,
+  "themes": [
+   "views",
+   "himalaya",
+   "quiet",
+   "tea",
+   "sunrise",
+   "hill"
+  ],
+  "counts": {
+   "sights": 7,
+   "eateries": 0,
+   "stays": 9
+  },
+  "text": "Kausani (Kumaon, 1,890 m). The lower part of Kausani has a local market and the upper part of the town, where the Gandhi Ashram is situated is the place where most of the better hotels are found. Good for: views, himalaya, quiet, tea, sunrise, hill. Highlights: Baijnath temple, Binsar Mahadev, Budha Pinath Temple, Pinath Temple, Pingla Devi Temple, Rudradhari Mahadev Temple. 7 things to see and do, 0 eateries, 9 stays."
+ },
+ {
+  "id": "destination_binsar",
+  "name": "Binsar",
+  "region": "Kumaon",
+  "elevation_m": 2420,
+  "themes": [
+   "wildlife",
+   "forest",
+   "birding",
+   "views",
+   "quiet"
+  ],
+  "counts": {
+   "sights": 7,
+   "eateries": 0,
+   "stays": 7
+  },
+  "text": "Binsar (Kumaon, 2,420 m). History Landscape Flora and fauna Binsar is predominantly an oak and rhododendron forest, with pine trees in the lower reaches. Climate Good for: wildlife, forest, birding, views, quiet. Highlights: Binsar WLS, Golchumandir, SHIVALAY MANDIR, View Point overlooking Katdhara Village, Water hole, Zero point BINSAR. 7 things to see and do, 0 eateries, 7 stays."
+ },
+ {
+  "id": "destination_munsiyari",
+  "name": "Munsiyari",
+  "region": "Kumaon",
+  "elevation_m": 2200,
+  "themes": [
+   "trek",
+   "himalaya",
+   "views",
+   "snow",
+   "culture"
+  ],
+  "counts": {
+   "sights": 2,
+   "eateries": 1,
+   "stays": 3
+  },
+  "text": "Munsiyari (Kumaon, 2,200 m). A remote Kumaon town facing the Panchachuli peaks, base for Khaliya Top and Milam glacier treks. Good for: trek, himalaya, views, snow, culture. Highlights: Nanda Devi Temple, Khalia Danda. 2 things to see and do, 1 eateries, 3 stays."
+ },
+ {
+  "id": "destination_pithoragarh",
+  "name": "Pithoragarh",
+  "region": "Kumaon",
+  "elevation_m": 1514,
+  "themes": [
+   "fort",
+   "views",
+   "quiet",
+   "culture"
+  ],
+  "counts": {
+   "sights": 26,
+   "eateries": 14,
+   "stays": 10
+  },
+  "text": "Pithoragarh (Kumaon, 1,514 m). The town was named after a fort built in it, and the district was named after the town. There are two local legends for who built and named the fort: either Piru a.k.a. Good for: fort, views, quiet, culture. Highlights: Nainital, Gangolihat, Dhwaj, Jhulaghat, Walthi, Munsyari, Chandhag. 26 things to see and do, 14 eateries, 10 stays."
+ }
+]
